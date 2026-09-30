@@ -178,6 +178,8 @@ enum NotchCompactTests {
         class Handle { var view: TextView? = TextView() }
         var editor = Handle()
         var pad = ScratchpadService.shared
+        var titleFocused = false
+        var searchFocused = false
     }
     struct Entry: Identifiable { let id: Int }
     final class RailState: ObservableObject {
@@ -378,6 +380,12 @@ enum NotchCompactTests {
                          : "a rail with no least gap still scrolls the column that misses its width")
         }
     }
+    private struct ScratchpadFixtureView: View {
+        @ObservedObject var pad: ScratchpadService
+        var body: some View {
+            ScratchpadEditor(text: $pad.text, sourceMode: pad.isPreviewing)
+        }
+    }
     private static func scratchpad(_ suite: TestSuite) {
         let pad = ScratchpadService.shared
         pad.text = "original note"
@@ -385,7 +393,7 @@ enum NotchCompactTests {
         let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 424, height: 180),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        let host = NSHostingView(rootView: NotchScratchpadView(service: NotchService()))
+        let host = NSHostingView(rootView: ScratchpadFixtureView(pad: pad))
         window.contentView = host
         host.frame = NSRect(x: 0, y: 0, width: 424, height: 180)
         settle(host)
