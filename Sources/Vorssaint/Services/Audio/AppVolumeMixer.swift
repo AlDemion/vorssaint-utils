@@ -2757,13 +2757,25 @@ private final class TapGainEngine: GainEngine {
         func increment() { _ = OSAtomicIncrement64Barrier(&bits) }
     }
 
-    /// One limiter per output buffer, preallocated so the realtime thread
-    /// never allocates. Touched only by the IO proc once rendering starts.
+    /// One linked limiter for every output channel, preallocated so the
+    /// realtime thread never allocates. Touched only by the IO proc.
     private final class LimiterBox {
         let lookahead: BoostLookaheadBufferListLimiter
         var fallback = BoostBufferListLimiter()
         init(channelCapacity: Int) {
             lookahead = BoostLookaheadBufferListLimiter(channelCapacity: channelCapacity)
+        }
+
+        func process(_ output: UnsafeMutableAudioBufferListPointer, release: Float) {
+            var frames = Int.max
+            for buffer in output where buffer.mData != nil && buffer.mNumberChannels > 0 {
+                frames = min(frames, MixerRender.frames(bytes: buffer.mDataByteSize,
+                                                        channels: buffer.mNumberChannels))
+            }
+            guard frames > 0, frames < Int.max else { return }
+            if !lookahead.process(output, frames: frames, release: release) {
+                fallback.process(output, frames: frames, release: release)
+            }
         }
     }
 
@@ -2841,6 +2853,10 @@ private final class TapGainEngine: GainEngine {
         guard AudioDeviceCreateIOProcIDWithBlock(&ioProc, aggregateID, nil, { now, input, _, output, _ in
             let inputBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: input))
             let outputBuffers = UnsafeMutableAudioBufferListPointer(output)
+            // The output clock keeps moving through a short or missing tap
+            // buffer. Advance the delay over its silence too, or buffered
+            // audio is cut off and then replayed late on the next callback.
+            defer { limiterBox.process(outputBuffers, release: release.value) }
             guard let tapIndex = MixerRender.tapBufferIndex(in: inputBuffers,
                                                             tapChannels: tapChannels) else {
                 // No samples to put in the buffer is not a reason to leave it:
@@ -2854,17 +2870,10 @@ private final class TapGainEngine: GainEngine {
             let frames = MixerRender.render(source: inputBuffers[tapIndex],
                                             into: outputBuffers,
                                             gain: gain)
-            // Keep the tiny delay filled for every live engine. Crossing from
-            // attenuation into boost then changes level without inserting a
-            // fresh block of silence into audio that is already playing.
+            // Draining delayed audio alone must not hide a stalled capture
+            // from the engine's recovery check.
             guard frames > 0 else { return }
             cycles.increment()
-            let releaseCoefficient = release.value
-            if !limiterBox.lookahead.process(outputBuffers, frames: frames,
-                                             release: releaseCoefficient) {
-                limiterBox.fallback.process(outputBuffers, frames: frames,
-                                            release: releaseCoefficient)
-            }
         }) == noErr else {
             ioProc = nil
             stop()
