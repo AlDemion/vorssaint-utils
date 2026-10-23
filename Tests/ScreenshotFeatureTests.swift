@@ -540,7 +540,7 @@ enum ScreenshotFeatureTests {
             fixedBottomRows: 0) == 78..<120,
                "captures without a fixed footer keep the original crop geometry")
         // Each input is independent: repeating the same pure call adds no case.
-        for offset in [8, 76] {
+        for offset in [8, 76, 96, 104] {
             let transition = ScreenshotSupport.scrollingTransition(
                 previous: firstScrollSample,
                 current: scrollingSample(offset: offset))
@@ -548,6 +548,12 @@ enum ScreenshotFeatureTests {
                                             direction: .forward,
                                             contentColumns: 0..<16),
                    "scroll matching handles an advance of \(offset) rows: \(transition)")
+            suite.expect(ScreenshotSupport.scrollingTransition(
+                previous: scrollingSample(offset: offset),
+                current: firstScrollSample) == .advanced(overlap: 120 - offset,
+                                                       direction: .backward,
+                                                       contentColumns: 0..<16),
+                "small overlaps also identify backward scrolling by \(offset) rows")
         }
         let retinaScrollStart = scrollingSample(width: 32, height: 900, offset: 0)
         let retinaScrollNext = scrollingSample(width: 32, height: 900, offset: 558)
@@ -614,6 +620,15 @@ enum ScreenshotFeatureTests {
         suite.expect(ScreenshotSupport.scrollingTransition(previous: firstScrollSample,
                                                      current: unmatchedScrollSample) == .unmatched,
                "ambiguous content fails instead of inventing a seam")
+        func repeatedScrollSample(offset: Int) -> ScreenshotSupport.ScrollingSample {
+            .init(width: 16, height: 120, pixels: (0..<(16 * 120)).map {
+                UInt8((($0 / 16 + offset) % 24) * 9)
+            })
+        }
+        suite.expect(ScreenshotSupport.scrollingTransition(
+            previous: repeatedScrollSample(offset: 0),
+            current: repeatedScrollSample(offset: 8)) == .unmatched,
+            "equally precise repeated rows cannot select an arbitrary scroll offset")
         suite.expectClose(Double(ScreenshotSupport.captureScale(fromDPI: 144) ?? 0), 2,
                     "the cached screenshot restores its Retina scale from PNG metadata")
         suite.expect(ScreenshotSupport.captureScale(fromDPI: nil) == nil

@@ -61,7 +61,8 @@ enum ScreenshotScrollingCaptureTests {
         suite.expect(completed, "scrolling capture completes without wheel events or desktop access")
     }
 
-    static func frame(offset: Int, height: Int = 120, seed: Int = 0) -> CGImage {
+    static func frame(offset: Int, height: Int = 120, seed: Int = 0,
+                      sparse: Bool = false) -> CGImage {
         let width = 32
         var pixels = [UInt8](repeating: 0, count: width * height)
         for row in 0..<height {
@@ -75,6 +76,12 @@ enum ScreenshotScrollingCaptureTests {
                     value = (value ^ (value >> 16)) &* 0x45d9f3b
                     value = (value ^ (value >> 16)) &* 0x45d9f3b
                     pixels[row * width + column] = UInt8(truncatingIfNeeded: value ^ (value >> 16))
+                }
+                if sparse {
+                    // Text-like rows separated by white space. Random pixels
+                    // alone do not expose false matches against blank bands.
+                    pixels[row * width + column] = r % 24 < 8
+                        ? 215 + pixels[row * width + column] % 40 : 255
                 }
             }
         }
@@ -177,6 +184,25 @@ enum ScreenshotScrollingCaptureTests {
                          "transparent capture-edge padding never becomes a seam or loses content rows")
         } else { suite.expect(false, "padded screen captures must still join") }
 
+        // A larger advance halfway through a long page must not strand the
+        // matcher on its last accepted frame and discard every later viewport.
+        let longPageOffsets = [0, 42, 84, 180, 276, 372, 468, 564, 660]
+        if case .success(let capture) = await capture(longPageOffsets.map {
+            frame(offset: $0, seed: 91)
+        }) {
+            suite.expect(pixels(capture.image) == pixels(frame(offset: 0, height: 780, seed: 91)),
+                         "a long capture preserves every row after a near-page advance")
+        } else { suite.expect(false, "long pages keep capturing after smaller overlaps") }
+
+        let sparsePageOffsets = [0, 8, 94, 180, 266, 352, 438, 524, 610]
+        if case .success(let capture) = await capture(sparsePageOffsets.map {
+            frame(offset: $0, seed: 91, sparse: true)
+        }) {
+            suite.expect(pixels(capture.image)
+                == pixels(frame(offset: 0, height: 730, seed: 91, sparse: true)),
+                         "white bands on a long page never turn forward scrolling into backtracking")
+        } else { suite.expect(false, "long pages with white space preserve their full content") }
+
         if case .success(let capture) = await capture([frame(offset: 0)]) {
             suite.expect(capture.image.height == 120, "Done without scrolling returns the initial capture")
         } else { suite.expect(false, "Done must also work without any scroll movement") }
@@ -184,6 +210,14 @@ enum ScreenshotScrollingCaptureTests {
         if case .partial(let capture) = await capture([frame(offset: 0), frame(offset: 0, seed: 91)]) {
             suite.expect(capture.image.height == 120, "unmatched scrolling preserves the first frame")
         } else { suite.expect(false, "Done preserves a partial image when no overlap is found") }
+
+        if case .partial(let capture) = await capture([
+            frame(offset: 0, seed: 91, sparse: true),
+            frame(offset: 104, seed: 731, sparse: true)
+        ]) {
+            suite.expect(capture.image.height == 120,
+                         "unrelated sparse pages cannot be stitched together just on white space")
+        } else { suite.expect(false, "white space alone cannot establish page continuity") }
 
         if case .partial(let capture) = await capture([
             frame(offset: 0), frame(offset: 42), frame(offset: 0, seed: 91)

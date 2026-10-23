@@ -500,9 +500,11 @@ enum ScreenshotSupport {
             if $0.supportingTiles != $1.supportingTiles {
                 return $0.supportingTiles > $1.supportingTiles
             }
+            // A shorter exact overlap is safer than a long approximate match
+            // against repeated rows elsewhere on the page.
+            if $0.difference != $1.difference { return $0.difference < $1.difference }
             if $0.longestRun != $1.longestRun { return $0.longestRun > $1.longestRun }
-            if $0.matchingRows != $1.matchingRows { return $0.matchingRows > $1.matchingRows }
-            return $0.difference < $1.difference
+            return $0.matchingRows > $1.matchingRows
         }
 
         let best = matches[0]
@@ -511,16 +513,17 @@ enum ScreenshotSupport {
             return .unmatched
         }
 
-        // Repeated blank bands can look equally good at several offsets. A
-        // unique match is required instead of guessing and creating a seam.
-        if let rival = matches.dropFirst().first(where: {
-            $0.reversed != best.reversed || abs($0.advance - best.advance) > 2
-        }),
-           rival.contentColumns.count >= best.contentColumns.count - 1,
-           rival.supportingTiles >= best.supportingTiles - 1,
-           rival.longestRun >= best.longestRun - 2,
-           rival.matchingRows >= best.matchingRows - max(3, best.supportingTiles * 3),
-           rival.difference <= best.difference + 0.75 {
+        // Repeated content can match equally well over different lengths.
+        // Require comparable support so a short blank band does not veto a
+        // longer match, but reject any equally precise, substantial rival.
+        if matches.dropFirst().contains(where: { rival in
+            (rival.reversed != best.reversed || abs(rival.advance - best.advance) > 2)
+                && rival.contentColumns.count >= best.contentColumns.count - 1
+                && rival.supportingTiles >= best.supportingTiles - 1
+                && rival.longestRun >= max(requiredRun, best.longestRun / 2)
+                && rival.matchingRows >= max(requiredRun, best.matchingRows / 2)
+                && rival.difference <= best.difference + 0.75
+        }) {
             return .unmatched
         }
         return .advanced(overlap: height - best.advance,
@@ -690,7 +693,10 @@ enum ScreenshotSupport {
                                        columns: Range<Int>,
                                        differences: [Float]) -> ScrollingRowMatch? {
         let width = previous.width
-        let edgeInset = max(2, previous.height / 10)
+        // Trim the shared rows, not the whole viewport. A viewport-sized inset
+        // can erase a valid smaller overlap and strand a long capture on its
+        // last accepted frame, or favor a blank band at the wrong offset.
+        let edgeInset = max(2, (previous.height - advance) / 10)
         let lastRow = previous.height - advance - edgeInset
         guard lastRow > edgeInset,
               columns.lowerBound >= 0,
@@ -708,22 +714,25 @@ enum ScreenshotSupport {
         var longestRun = 0
         var run = 0
         var matchingRows = 0
+        var totalDifference: Float = 0
         let threshold = Float(columns.count * 8)
         rowDifferences.withUnsafeBufferPointer { rows in
             var row = 0
             while row < rowCount {
                 if rows[row] <= threshold {
+                    totalDifference += rows[row]
                     run += 1
                     matchingRows += 1
                     if run > longestRun { longestRun = run }
                 } else {
+                    // Bound the influence of a changing block without treating
+                    // its rows as matches or discarding their error entirely.
+                    totalDifference += threshold
                     run = 0
                 }
                 row += 1
             }
         }
-        var totalDifference: Float = 0
-        vDSP_sve(rowDifferences, 1, &totalDifference, vDSP_Length(rowCount))
         return ScrollingRowMatch(longestRun: longestRun,
                                  matchingRows: matchingRows,
                                  comparedRows: rowCount,
