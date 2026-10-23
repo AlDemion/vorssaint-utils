@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Summary
+The menu bar panel uses a single, consistent outline on macOS Sonoma and Sequoia.
+
+### Fixed
+- The menu bar panel no longer draws a second background with mismatched corners on macOS Sonoma and Sequoia. Thanks to @Goonwb and @derpyjoystick.
+
 ## [3.4.2] - 2026-10-21
 
 ### Summary
