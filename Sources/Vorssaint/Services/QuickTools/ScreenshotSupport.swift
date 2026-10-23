@@ -404,12 +404,16 @@ enum ScreenshotSupport {
     static func scrollingSamplesAreStable(_ previous: ScrollingSample,
                                           _ current: ScrollingSample,
                                           contentColumns: Range<Int>? = nil) -> Bool {
-        previous.isValid && current.isValid
-            && previous.width == current.width
-            && previous.height == current.height
-            && scrollingDifference(previous,
-                                   current,
-                                   columns: contentColumns ?? 0..<previous.width) <= 1.5
+        guard previous.isValid, current.isValid,
+              previous.width == current.width,
+              previous.height == current.height else { return false }
+        let columns = contentColumns ?? 0..<previous.width
+        guard columns.lowerBound >= 0, columns.upperBound <= previous.width,
+              !columns.isEmpty else { return false }
+        // Empty space must not dilute movement in a narrow column of text.
+        return scrollingColumnTiles(in: columns, sampleWidth: previous.width).allSatisfy {
+            scrollingDifference(previous, current, columns: $0) <= 1.5
+        }
     }
 
     /// Finds how many rows two successive views share. The calculation is
@@ -455,6 +459,43 @@ enum ScreenshotSupport {
         }
 
         let tiles = scrollingColumnTiles(in: columns, sampleWidth: previous.width)
+        if previous.width > 32 {
+            // Keep native detail where pixels actually change, instead of
+            // shrinking a wide Terminal until different digits look alike.
+            // Limit the expensive offset search to 32 representative columns.
+            let selected: [(column: Int, bounds: Range<Int>)]
+            if columns.count <= 32 {
+                selected = columns.map { ($0, $0..<($0 + 1)) }
+            } else {
+                let perTile = max(1, 32 / tiles.count)
+                selected = tiles.flatMap { tile in
+                    tile.map { column in
+                        (column: column, difference: scrollingDifference(
+                            previous, current, columns: column..<(column + 1)))
+                    }.sorted {
+                        if $0.difference != $1.difference { return $0.difference > $1.difference }
+                        return $0.column < $1.column
+                    }.prefix(perTile).map(\.column).sorted().map { ($0, tile) }
+                }
+            }
+            func compact(_ sample: ScrollingSample) -> ScrollingSample {
+                var pixels = [UInt8]()
+                pixels.reserveCapacity(selected.count * sample.height)
+                for row in 0..<sample.height {
+                    let start = row * sample.width
+                    for selection in selected { pixels.append(sample.pixels[start + selection.column]) }
+                }
+                return .init(width: selected.count, height: sample.height, pixels: pixels)
+            }
+            let transition = scrollingTransition(previous: compact(previous), current: compact(current))
+            if case .advanced(let overlap, let direction, let matched) = transition {
+                let lower = selected[matched.lowerBound].bounds.lowerBound
+                let upper = selected[matched.upperBound - 1].bounds.upperBound
+                return .advanced(overlap: overlap, direction: direction,
+                                 contentColumns: lower..<upper)
+            }
+            return transition
+        }
         let movingTiles = tiles.filter {
             scrollingDifference(previous, current, columns: $0) > 1.5
         }
@@ -500,9 +541,12 @@ enum ScreenshotSupport {
             if $0.supportingTiles != $1.supportingTiles {
                 return $0.supportingTiles > $1.supportingTiles
             }
+            // Similar digits can pass the row tolerance at a wrong offset.
+            // Prefer the closer pixel match before rewarding a longer overlap,
+            // which otherwise biases sparse text toward a shorter scroll.
+            if $0.difference != $1.difference { return $0.difference < $1.difference }
             if $0.longestRun != $1.longestRun { return $0.longestRun > $1.longestRun }
-            if $0.matchingRows != $1.matchingRows { return $0.matchingRows > $1.matchingRows }
-            return $0.difference < $1.difference
+            return $0.matchingRows > $1.matchingRows
         }
 
         let best = matches[0]
