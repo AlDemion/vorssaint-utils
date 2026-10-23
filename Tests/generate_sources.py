@@ -1046,7 +1046,7 @@ def main():
             .replace("    func", "    @discardableResult\n    func", 1)
           + "".join(declaration(notch, prefix).replace("    private ", "    ", 1) for prefix in [
               "    private var hiddenUntilHover:", "    private var hiddenAtRestInFullscreen:",
-              "    private var watchesHiddenHover:", "    func hover(",
+              "    private var hoverOpeningEnabled:", "    private var watchesHiddenHover:", "    func hover(",
               "    func shelfDragMoved(",
               "    private func syncHoverExitMonitoring(", "    private func removeHoverExitMonitors(",
               "    var showsCompactActivityPicker:",

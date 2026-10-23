@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Summary
-Clearer screenshot tools, more reliable clipboard history and Command Bar answers, and better monitoring and headphone detection.
+Clearer screenshot tools, more reliable clipboard history and Command Bar answers, and better monitoring and headphone detection. Dynamic Island restores the choice to stay hidden in full screen, with a separate option for hover access.
 
 ### Changed
 - Command Bar accepts British unit spellings and spaced fluid-ounce names.
@@ -19,11 +19,12 @@ Clearer screenshot tools, more reliable clipboard history and Command Bar answer
 - Clipboard history ignores marked temporary content and restores the previous copy without another notice, while preserving ordinary copies and sensitive-text filtering.
 - Pinned GPU, temperature and fan menu bar readings follow the selected System monitor update interval.
 - Dynamic Island's full-screen hiding recognizes games whose windows cover the desktop without entering a separate full-screen space.
+- Dynamic Island's Hide content in full screen blocks hover opening again. Hidden until hover in full screen is a separate option under Settings → Dynamic Island → Behavior → Display, leaving the opening mode outside full screen unchanged.
 - Volume mixer recognizes headphones from their Core Audio device information, including models whose names do not say headphones.
 - Screenshot area selection keeps its crosshair over other apps, and card shadows follow the captured window's own rounded corners.
 
 ### Contributors
-Thanks to @0miicr0n, @DigitalWestern, @hash00, @Jacob-9909, @JB-OD, @JeanBaeez, @Likheet, @muratozturk5, @raymondchins and @stors789.
+Thanks to @0miicr0n, @DigitalWestern, @hash00, @Jacob-9909, @JB-OD, @JeanBaeez, @Likheet, @LJXXXD, @muratozturk5, @raymondchins and @stors789.
 
 ## [3.4.2] - 2026-10-21
 
