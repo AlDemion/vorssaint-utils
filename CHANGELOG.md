@@ -7,7 +7,7 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Summary
-Clearer screenshot tools, more reliable clipboard history and Command Bar answers, and better monitoring and headphone detection.
+Clearer screenshot tools, more reliable clipboard history and Command Bar answers, better monitoring and headphone detection, and cleaner microphone audio in screen recordings.
 
 ### Changed
 - Command Bar accepts British unit spellings and spaced fluid-ounce names.
@@ -20,6 +20,7 @@ Clearer screenshot tools, more reliable clipboard history and Command Bar answer
 - Pinned GPU, temperature and fan menu bar readings follow the selected System monitor update interval.
 - Dynamic Island's full-screen hiding recognizes games whose windows cover the desktop without entering a separate full-screen space.
 - Volume mixer recognizes headphones from their Core Audio device information, including models whose names do not say headphones.
+- Screen recordings avoid loud noise from 16-bit USB microphones. Thanks to @globeatin.
 - Screenshot area selection keeps its crosshair over other apps, and card shadows follow the captured window's own rounded corners.
 
 ### Contributors
