@@ -7,7 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Summary
-Clearer screenshot tools, more reliable clipboard history and Command Bar answers, and better monitoring and headphone detection.
+Clearer screenshot tools, more reliable clipboard history and Command Bar answers, and better monitoring and headphone detection. Window layouts can keep Stage Manager's recent apps visible.
+
+### Added
+- Window layout can reserve space for Stage Manager when maximizing or arranging windows, including the green-button override. Settings → Window layout → Reserve space for Stage Manager. Thanks to @ilvesBogdan and @jainnam-1993.
 
 ### Changed
 - Command Bar accepts British unit spellings and spaced fluid-ounce names.
