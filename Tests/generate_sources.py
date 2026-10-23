@@ -665,6 +665,20 @@ def main():
           + declaration("Sources/Vorssaint/Services/MouseButtons/MouseButtonShortcutService.swift",
                         "    private func sideWheelInput(for event:").replace("private func", "func", 1)
           + "}\n")
+    mouse_buttons = "Sources/Vorssaint/Services/MouseButtons/MouseButtonShortcutService.swift"
+    spaces_replay = declaration(mouse_buttons, "    private func replaySpacesPress(").replace("private func", "func", 1)
+    write("MouseSpacesGestureTap.swift", "import AppKit\nimport ApplicationServices\nimport CoreGraphics\n"
+          + "extension MouseSpacesGestureTapTests.Service {\n"
+          + "".join(declaration(mouse_buttons, prefix).replace("private ", "", 1)
+                    .replace("AppFeature.mouseButtonShortcuts.isAvailable",
+                             "AppFeature.mouseButtonShortcuts.isAvailable(in: UserDefaults.standard)")
+                    for prefix in ["    private struct SpacesGesturePress {", "    func setCapturing(",
+                                   "    private func handle(proxy:", "    private func armSpacesGesture(",
+                                   "    private func advanceSpacesGesture("])
+          + spaces_replay.replace("down.tapPostEvent(proxy)", "recordReplay(down)")
+                         .replace("down.post(tap: .cgSessionEventTap)", "recordReplay(down)")
+                         .replace("if let proxy {", "if proxy != nil {")
+          + "}\n")
     smooth = "Sources/Vorssaint/Services/SmoothScrollService.swift"
     smooth_handler = declaration(smooth, "    private func handle(type:").replace("private func", "func", 1)
     smooth_handler = smooth_handler.replace("AppFeature.smoothScroll.isAvailable", "AppFeature.smoothScroll.isAvailable(in: UserDefaults.standard)")

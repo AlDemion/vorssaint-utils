@@ -7,7 +7,10 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Summary
-Clearer screenshot tools, more reliable clipboard history and Command Bar answers, and better monitoring and headphone detection.
+Clearer screenshot tools, more reliable clipboard history and Command Bar answers, better monitoring and headphone detection, and middle-button desktop gestures.
+
+### Added
+- Switch Spaces by dragging a button now accepts the middle mouse button, including upward drags for Mission Control and downward drags for App Exposé. A short click keeps its normal behavior. Settings → Mouse → Mouse button shortcuts.
 
 ### Changed
 - Command Bar accepts British unit spellings and spaced fluid-ounce names.
@@ -23,7 +26,7 @@ Clearer screenshot tools, more reliable clipboard history and Command Bar answer
 - Screenshot area selection keeps its crosshair over other apps, and card shadows follow the captured window's own rounded corners.
 
 ### Contributors
-Thanks to @0miicr0n, @DigitalWestern, @hash00, @Jacob-9909, @JB-OD, @JeanBaeez, @Likheet, @muratozturk5, @raymondchins and @stors789.
+Thanks to @0miicr0n, @DigitalWestern, @hash00, @Jacob-9909, @JB-OD, @JeanBaeez, @Likheet, @muratozturk5, @raymondchins, @Spokplacenta and @stors789.
 
 ## [3.4.2] - 2026-10-21
 
