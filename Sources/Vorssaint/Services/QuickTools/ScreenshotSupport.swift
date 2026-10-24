@@ -516,13 +516,16 @@ enum ScreenshotSupport {
         // Repeated content can match equally well over different lengths.
         // Require comparable support so a short blank band does not veto a
         // longer match, but reject any equally precise, substantial rival.
+        // Scale the error margin down for precise matches: an approximate
+        // low-contrast pattern must not veto an exact overlap.
+        let ambiguityTolerance = min(0.75, best.difference)
         if matches.dropFirst().contains(where: { rival in
             (rival.reversed != best.reversed || abs(rival.advance - best.advance) > 2)
                 && rival.contentColumns.count >= best.contentColumns.count - 1
                 && rival.supportingTiles >= best.supportingTiles - 1
                 && rival.longestRun >= max(requiredRun, best.longestRun / 2)
                 && rival.matchingRows >= max(requiredRun, best.matchingRows / 2)
-                && rival.difference <= best.difference + 0.75
+                && rival.difference <= best.difference + ambiguityTolerance
         }) {
             return .unmatched
         }

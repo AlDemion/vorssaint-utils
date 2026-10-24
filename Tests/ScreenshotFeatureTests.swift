@@ -466,6 +466,26 @@ enum ScreenshotFeatureTests {
         suite.expect(ScreenshotSupport.scrollingSamplesAreStable(nextScrollSample,
                                                            nextScrollSample),
                "settling recognizes two unchanged scrolling frames")
+        func lowContrastSample(offset: Int, noisy: Bool = false) -> ScreenshotSupport.ScrollingSample {
+            let sample = scrollingSample(offset: offset)
+            var pixels = sample.pixels.map { $0 / 16 }
+            if noisy {
+                for index in stride(from: 0, to: pixels.count, by: 17) { pixels[index] += 1 }
+            }
+            return .init(width: sample.width, height: sample.height, pixels: pixels)
+        }
+        for offset in [2, 42] {
+            for noisy in [false, true] {
+                let start = lowContrastSample(offset: 0)
+                let next = lowContrastSample(offset: offset, noisy: noisy)
+                suite.expect(ScreenshotSupport.scrollingTransition(previous: start, current: next)
+                        == .advanced(overlap: 120 - offset, direction: .forward, contentColumns: 0..<16),
+                             "a precise low-contrast overlap survives similar rows, offset: \(offset), noisy: \(noisy)")
+                suite.expect(ScreenshotSupport.scrollingTransition(previous: next, current: start)
+                        == .advanced(overlap: 120 - offset, direction: .backward, contentColumns: 0..<16),
+                             "low-contrast backtracking keeps the correct overlap, offset: \(offset), noisy: \(noisy)")
+            }
+        }
         let shortFinalScrollSample = scrollingSample(offset: 8)
         suite.expect(ScreenshotSupport.scrollingTransition(previous: firstScrollSample,
                                                      current: shortFinalScrollSample)
@@ -620,15 +640,21 @@ enum ScreenshotFeatureTests {
         suite.expect(ScreenshotSupport.scrollingTransition(previous: firstScrollSample,
                                                      current: unmatchedScrollSample) == .unmatched,
                "ambiguous content fails instead of inventing a seam")
-        func repeatedScrollSample(offset: Int) -> ScreenshotSupport.ScrollingSample {
-            .init(width: 16, height: 120, pixels: (0..<(16 * 120)).map {
-                UInt8((($0 / 16 + offset) % 24) * 9)
-            })
+        func repeatedScrollSample(offset: Int, noisy: Bool = false) -> ScreenshotSupport.ScrollingSample {
+            var pixels = [UInt8](repeating: 0, count: 16 * 120)
+            for index in pixels.indices {
+                let row = (index / 16 + offset) % 24
+                let noise = noisy && index % 17 == 0 ? 1 : 0
+                pixels[index] = UInt8(row * 9 + noise)
+            }
+            return .init(width: 16, height: 120, pixels: pixels)
         }
-        suite.expect(ScreenshotSupport.scrollingTransition(
-            previous: repeatedScrollSample(offset: 0),
-            current: repeatedScrollSample(offset: 8)) == .unmatched,
-            "equally precise repeated rows cannot select an arbitrary scroll offset")
+        for noisy in [false, true] {
+            suite.expect(ScreenshotSupport.scrollingTransition(
+                previous: repeatedScrollSample(offset: 0),
+                current: repeatedScrollSample(offset: 8, noisy: noisy)) == .unmatched,
+                "equally precise repeated rows cannot select an arbitrary scroll offset, noisy: \(noisy)")
+        }
         suite.expectClose(Double(ScreenshotSupport.captureScale(fromDPI: 144) ?? 0), 2,
                     "the cached screenshot restores its Retina scale from PNG metadata")
         suite.expect(ScreenshotSupport.captureScale(fromDPI: nil) == nil
