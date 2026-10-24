@@ -474,6 +474,10 @@ enum ScreenshotFeatureTests {
             }
             return .init(width: sample.width, height: sample.height, pixels: pixels)
         }
+        suite.expect(ScreenshotSupport.scrollingTransition(previous: lowContrastSample(offset: 0),
+                                                           current: lowContrastSample(offset: 42))
+                == .advanced(overlap: 78, direction: .forward, contentColumns: 0..<16),
+               "a precise low-contrast overlap beats longer but only similar rows")
         for offset in [2, 42] {
             for noisy in [false, true] {
                 let start = lowContrastSample(offset: 0)
