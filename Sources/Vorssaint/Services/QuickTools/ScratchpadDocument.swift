@@ -146,6 +146,13 @@ struct ScratchpadDocument: Codable, Equatable {
         return next
     }
 
+    func adjacentOpenID(offset: Int) -> UUID? {
+        guard offset == -1 || offset == 1,
+              let index = openIDs.firstIndex(of: selectedID),
+              openIDs.indices.contains(index + offset) else { return nil }
+        return openIDs[index + offset]
+    }
+
     func duplicating(_ sourceID: UUID, id: UUID = UUID(), now: Date) -> ScratchpadDocument? {
         guard let source = pads.first(where: { $0.id == sourceID && $0.deletedAt == nil }),
               !pads.contains(where: { $0.id == id }) else { return nil }

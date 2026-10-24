@@ -59,6 +59,12 @@ struct ScratchpadWorkspace: View {
         .onChange(of: service.pads.map(\.id)) { _, ids in
             editorSessions.retain(Set(ids))
         }
+        .onChange(of: service.showsSidebar) { _, browsing in
+            if !browsing {
+                searchFocused = false
+                DispatchQueue.main.async { focusEditor() }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .scratchpadFocusSearch)) { _ in
             guard hostWindow?.isKeyWindow == true else { return }
             service.showsSidebar = true
@@ -79,44 +85,75 @@ struct ScratchpadWorkspace: View {
 
     private var navigation: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 7) {
+            HStack(spacing: 4) {
                 Button { service.showsSidebar.toggle() } label: { Image(systemName: "sidebar.left").frame(width: 24, height: 24).contentShape(Rectangle()) }
                     .help(labels[.sidebar]).accessibilityLabel(labels[.sidebar])
-                Menu {
-                    collectionChoices
-                    Divider()
-                    ForEach(service.folders) { folder in
-                        Button(folder.name) { service.collection = .folder(folder.id); service.showsSidebar = true }
+                if service.showsSidebar {
+                    if !island { ScratchpadDragHandle().frame(width: 14, height: 24) }
+                    Menu {
+                        collectionChoices
+                        Divider()
+                        ForEach(service.folders) { folder in
+                            Button(folder.name) { service.collection = .folder(folder.id); service.showsSidebar = true }
+                        }
+                        Divider()
+                        Button(labels[.newFolder]) { present(.newFolder) }
+                    } label: {
+                        Label(collectionName, systemImage: collectionSymbol).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    Divider()
-                    Button(labels[.newFolder]) { present(.newFolder) }
-                } label: {
-                    Label(collectionName, systemImage: collectionSymbol).lineLimit(1).frame(maxWidth: 140, alignment: .leading)
+                    .menuStyle(.borderlessButton)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    adjacentButton(offset: -1, symbol: "chevron.left", label: .previousNote)
+                    adjacentButton(offset: 1, symbol: "chevron.right", label: .nextNote)
+                    Text(service.selectedPadName).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background { if !island { ScratchpadDragHandle() } }
                 }
-                .menuStyle(.borderlessButton).fixedSize()
-                Spacer(minLength: 0)
                 Button { service.createPadInCollection() } label: { Image(systemName: "plus").frame(width: 24, height: 24).contentShape(Rectangle()) }
                     .help(text.newPad).accessibilityLabel(text.newPad).disabled(!service.canCreatePad)
                 actionsMenu
+                if !island {
+                    Button(action: service.togglePin) {
+                        Image(systemName: service.isPinned ? "pin.fill" : "pin").frame(width: 24, height: 24)
+                    }
+                    .help(service.isPinned ? text.closeOnClickOutside : text.keepOpen)
+                    .accessibilityLabel(service.isPinned ? text.closeOnClickOutside : text.keepOpen)
+                    Button(action: service.hide) {
+                        Image(systemName: "xmark.circle.fill").frame(width: 24, height: 24)
+                    }
+                    .help(l10n.s.menuClose).accessibilityLabel(l10n.s.menuClose)
+                }
             }
             .buttonStyle(.plain)
             .font(.system(size: 12))
-            .padding(.horizontal, 12).frame(height: 30)
-            ScrollViewReader { proxy in
-                ScrollView(.horizontal) {
-                    LazyHStack(spacing: 4) {
-                        ForEach(service.pads) { pad in tab(pad).id(pad.id) }
+            .padding(.horizontal, 12).frame(height: 32)
+            if service.showsSidebar {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal) {
+                        LazyHStack(spacing: 4) {
+                            ForEach(service.pads) { pad in tab(pad).id(pad.id) }
+                        }
+                        .padding(.horizontal, 9).padding(.vertical, 4)
                     }
-                    .padding(.horizontal, 9).padding(.vertical, 4)
+                    .scrollIndicators(.hidden)
+                    .onChange(of: service.selectedPadID) { _, id in
+                        if let id { proxy.scrollTo(id, anchor: .center) }
+                    }
                 }
-                .scrollIndicators(.hidden)
-                .onChange(of: service.selectedPadID) { _, id in
-                    if let id { proxy.scrollTo(id, anchor: .center) }
-                }
+                .frame(height: 34)
             }
-            .frame(height: 34)
             if !island { Divider().opacity(0.4) }
         }
+    }
+
+    private func adjacentButton(offset: Int, symbol: String, label: ScratchpadLibraryLabel) -> some View {
+        let index = service.pads.firstIndex { $0.id == service.selectedPadID }
+        let available = index.map { service.pads.indices.contains($0 + offset) } ?? false
+        return Button { service.selectAdjacentPad(offset: offset) } label: {
+            Image(systemName: symbol).frame(width: 20, height: 24)
+        }
+        .disabled(!available).help(labels[label]).accessibilityLabel(labels[label])
     }
 
     @ViewBuilder private var collectionChoices: some View {
@@ -194,6 +231,7 @@ struct ScratchpadWorkspace: View {
                         createsCheckboxOnNewLine: service.createsCheckboxOnNewLine,
                         position: service.editingPositions[pad.id],
                         session: editorSessions.session(for: pad.id),
+                        onNavigate: { service.selectAdjacentPad(offset: $0) },
                         onPosition: { service.editingPositions[pad.id] = $0 },
                         onCreate: { view in
                             if !island { service.registerTextView(view) }

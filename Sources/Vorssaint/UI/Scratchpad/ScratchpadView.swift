@@ -6,28 +6,10 @@ import SwiftUI
 
 struct ScratchpadView: View {
     @ObservedObject private var service = ScratchpadService.shared
-    @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.scratchpadBackgroundOpacity) private var backgroundOpacity = 0.0
-    private var text: ScratchpadFeatureStrings { FeatureStrings.scratchpad(l10n.language) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Text(text.pageTitle).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
-                ScratchpadDragHandle().frame(maxWidth: .infinity, minHeight: 30)
-                Button(action: service.togglePin) {
-                    Image(systemName: service.isPinned ? "pin.fill" : "pin").frame(width: 24, height: 24).contentShape(Rectangle())
-                }
-                .help(service.isPinned ? text.closeOnClickOutside : text.keepOpen)
-                .accessibilityLabel(service.isPinned ? text.closeOnClickOutside : text.keepOpen)
-                Button(action: service.hide) { Image(systemName: "xmark.circle.fill").frame(width: 24, height: 24).contentShape(Rectangle()) }
-                    .help(l10n.s.menuClose).accessibilityLabel(l10n.s.menuClose)
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, 12)
-            .frame(height: 32)
-            ScratchpadWorkspace(island: false)
-        }
+        ScratchpadWorkspace(island: false)
         .frame(minWidth: 280, minHeight: 220)
         .background {
             ZStack {
@@ -46,7 +28,7 @@ struct ScratchpadView: View {
 
 /// A transparent strip over the header that moves the whole panel when
 /// dragged; everything below it stays free for text selection.
-private struct ScratchpadDragHandle: NSViewRepresentable {
+struct ScratchpadDragHandle: NSViewRepresentable {
     func makeNSView(context: Context) -> DragHandleView {
         DragHandleView()
     }

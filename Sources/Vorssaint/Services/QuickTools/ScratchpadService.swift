@@ -284,6 +284,11 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         apply(next, focus: true)
     }
 
+    func selectAdjacentPad(offset: Int) {
+        guard let id = document?.adjacentOpenID(offset: offset) else { return }
+        selectPad(id)
+    }
+
     func renamePad(_ id: UUID, to name: String) {
         guard let document, let next = document.renaming(id, to: name), save(next) else { return }
         apply(next, focus: id == selectedPadID)
@@ -315,6 +320,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         guard let document, var next = document.addingPad(defaultName: FeatureStrings.scratchpad(L10n.shared.language).pageTitle) else { return }
         if case .folder(let folder) = collection { next.pads[next.pads.count - 1].folderID = folder }
         guard save(next) else { return }
+        showsSidebar = false
         apply(next, focus: true)
     }
 

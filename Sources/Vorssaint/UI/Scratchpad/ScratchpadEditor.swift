@@ -19,6 +19,7 @@ struct ScratchpadEditor: NSViewRepresentable {
     var createsCheckboxOnNewLine = false
     var position: ScratchpadEditorPosition?
     var session: Session?
+    var onNavigate: ((Int) -> Void)?
     var onPosition: ((ScratchpadEditorPosition) -> Void)?
     var onCreate: ((NSTextView) -> Void)?
     var onDismantle: ((NSTextView) -> Void)?
@@ -160,6 +161,12 @@ struct ScratchpadEditor: NSViewRepresentable {
         override func keyDown(with event: NSEvent) {
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
             if !hasMarkedText(), let coordinator = delegate as? Coordinator {
+                if modifiers == .command, let navigate = coordinator.parent.onNavigate,
+                   let key = event.charactersIgnoringModifiers, key == "[" || key == "]" {
+                    breakUndoCoalescing()
+                    navigate(key == "[" ? -1 : 1)
+                    return
+                }
                 if modifiers == [.command, .shift], event.charactersIgnoringModifiers?.lowercased() == "l" {
                     coordinator.apply(ScratchpadSupport.edit(applying: .checklist, to: string, selection: selectedRange()))
                     return

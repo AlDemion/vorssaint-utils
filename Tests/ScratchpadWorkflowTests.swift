@@ -24,6 +24,16 @@ enum ScratchpadWorkflowTests {
         suite.expect(document.selectedID == first && document.openIDs.last == first, "a retained note can reopen")
         document.reorderTab(first, before: document.openIDs[0])
         suite.expect(document.openIDs.first == first, "dragging reorders open tabs")
+        suite.expect(document.adjacentOpenID(offset: -1) == nil
+                     && document.adjacentOpenID(offset: 1) == document.openIDs[1],
+                     "adjacent navigation follows tab order and stops at the first note")
+        let last = document.selecting(document.openIDs.last!)!
+        suite.expect(last.adjacentOpenID(offset: 1) == nil
+                     && last.adjacentOpenID(offset: -1) == last.openIDs[last.openIDs.count - 2]
+                     && last.adjacentOpenID(offset: Int.max) == nil,
+                     "navigation stops at the last note without creating notes or accepting invalid offsets")
+        let closed = document.removing(document.openIDs[1])!
+        suite.expect(closed.adjacentOpenID(offset: 1) == document.openIDs[2], "navigation skips closed notes")
         suite.expect(document.notes(in: .folder(folder.id)).map(\.id) == [first]
                      && document.notes(in: .pinned).map(\.id) == [first], "folder and pinned filters use note metadata")
         suite.expect(document.notes(in: .all, query: "keep me").map(\.id) == [first], "search includes contents and ignores case")
@@ -221,6 +231,7 @@ enum ScratchpadWorkflowTests {
         @Published var texts = ["First note", "Second note"]
         @Published var selected = 0
         @Published var browsing = false
+        var navigations: [Int] = []
         let ids = [UUID(), UUID()]
         let sessions = ScratchpadEditor.Sessions()
     }
@@ -229,7 +240,8 @@ enum ScratchpadWorkflowTests {
         var body: some View {
             if !state.browsing {
                 ScratchpadEditor(text: $state.texts[state.selected],
-                                 session: state.sessions.session(for: state.ids[state.selected]))
+                                 session: state.sessions.session(for: state.ids[state.selected]),
+                                 onNavigate: { state.navigations.append($0) })
                     .id(state.selected)
             }
         }
@@ -267,6 +279,14 @@ enum ScratchpadWorkflowTests {
         settle()
         suite.expect(findEditor(host) === first && first.undoManager !== second.undoManager,
                      "switching notes reuses the native editor with a separate undo history per note")
+        for (key, code) in [("[", UInt16(33)), ("]", UInt16(30))] {
+            let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                characters: key, charactersIgnoringModifiers: key, isARepeat: false, keyCode: code)!
+            first.keyDown(with: event)
+        }
+        suite.expect(state.navigations == [-1, 1] && state.texts == ["A First note", "B Second note"],
+                     "Command-bracket navigation reaches the workspace without inserting text")
         first.undoManager?.undo()
         settle()
         suite.expect(state.texts == ["First note", "B Second note"], "undo after switching changes only the selected note")

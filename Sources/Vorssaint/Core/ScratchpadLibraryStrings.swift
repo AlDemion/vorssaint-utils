@@ -9,14 +9,37 @@ enum ScratchpadLibraryLabel: Int, CaseIterable {
     case deleteForever, permanentMessage, importNotes, backup, restoreBackup, exportFolder
     case replaceMessage, folderMessage, liveEditing, failed
     case duplicate, checklistTools, uncheckAll, removeCompleted, createCheckboxOnNewLine
+    case previousNote, nextNote
 }
 
 struct ScratchpadLibraryStrings {
     let language: AppLanguage
     subscript(_ label: ScratchpadLibraryLabel) -> String {
         if label == .createCheckboxOnNewLine { return "Create checkbox upon new line" }
+        if label == .previousNote || label == .nextNote {
+            let pair = Self.navigation[language]!
+            return label == .previousNote ? pair.0 : pair.1
+        }
         return Self.translations[language]![label.rawValue]
     }
+
+    private static let navigation: [AppLanguage: (String, String)] = [
+        .enUS: ("Previous note", "Next note"),
+        .ptBR: ("Nota anterior", "Próxima nota"),
+        .tr: ("Önceki not", "Sonraki not"),
+        .ru: ("Предыдущая заметка", "Следующая заметка"),
+        .es: ("Nota anterior", "Nota siguiente"),
+        .sk: ("Predchádzajúca poznámka", "Nasledujúca poznámka"),
+        .de: ("Vorherige Notiz", "Nächste Notiz"),
+        .fr: ("Note précédente", "Note suivante"),
+        .it: ("Nota precedente", "Nota successiva"),
+        .ja: ("前のノート", "次のノート"),
+        .ko: ("이전 노트", "다음 노트"),
+        .zhHans: ("上一条笔记", "下一条笔记"),
+        .zhTW: ("上一則筆記", "下一則筆記"),
+        .zhHK: ("上一則筆記", "下一則筆記"),
+        .uk: ("Попередня нотатка", "Наступна нотатка"),
+    ]
 
     private static let translations: [AppLanguage: [String]] = [
         .enUS: ["Inbox", "All notes", "Pinned", "Trash", "Folders", "New folder", "Rename folder", "Delete folder", "Move to folder", "Pin note", "Unpin note", "Temporary note", "Markdown source", "Browse notes", "Search notes", "Move to Trash", "Restore", "Empty Trash", "Delete permanently", "Permanently delete these notes? This cannot be undone.", "Import notes", "Back up Scratchpad", "Restore Scratchpad backup", "Export folder as Markdown", "Replace your notes with this backup? A recovery copy of your current notes will be saved first.", "The notes in this folder will move to Inbox.", "Live Markdown", "The operation could not be completed. Your existing notes were preserved.", "Duplicate note", "Checklist", "Uncheck all", "Remove completed items"],
