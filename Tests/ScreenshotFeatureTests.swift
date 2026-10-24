@@ -466,6 +466,15 @@ enum ScreenshotFeatureTests {
         suite.expect(ScreenshotSupport.scrollingSamplesAreStable(nextScrollSample,
                                                            nextScrollSample),
                "settling recognizes two unchanged scrolling frames")
+        func lowContrastSample(offset: Int) -> ScreenshotSupport.ScrollingSample {
+            let sample = scrollingSample(offset: offset)
+            return .init(width: sample.width, height: sample.height,
+                         pixels: sample.pixels.map { $0 / 16 })
+        }
+        suite.expect(ScreenshotSupport.scrollingTransition(previous: lowContrastSample(offset: 0),
+                                                           current: lowContrastSample(offset: 42))
+                == .advanced(overlap: 78, direction: .forward, contentColumns: 0..<16),
+               "a precise low-contrast overlap beats longer but only similar rows")
         let shortFinalScrollSample = scrollingSample(offset: 8)
         suite.expect(ScreenshotSupport.scrollingTransition(previous: firstScrollSample,
                                                      current: shortFinalScrollSample)
