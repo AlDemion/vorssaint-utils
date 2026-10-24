@@ -18,7 +18,6 @@ struct ScratchpadWorkspace: View {
     @State private var activeMarks = Set<ScratchpadMark>()
     @State private var copied = false
     @State private var pendingFind: NSTextFinder.Action?
-    @State private var titleFocused = false
     @FocusState private var searchFocused: Bool
     private var text: ScratchpadFeatureStrings { FeatureStrings.scratchpad(l10n.language) }
     private var labels: ScratchpadLibraryStrings { .init(language: l10n.language) }
@@ -54,7 +53,6 @@ struct ScratchpadWorkspace: View {
         }
         .foregroundStyle(island ? Color.white : Color.primary)
         .onChange(of: service.selectedPadID) { _, _ in
-            titleFocused = false
             DispatchQueue.main.async { focusEditor() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .scratchpadFocusSearch)) { _ in
@@ -145,14 +143,24 @@ struct ScratchpadWorkspace: View {
     }
 
     private func tab(_ pad: ScratchpadPad) -> some View {
-        HStack(spacing: 5) {
+        let displayName = pad.name
+        return HStack(spacing: 5) {
             Button { service.selectPad(pad.id) } label: {
                 HStack(spacing: 4) {
                     if pad.isPinned { Image(systemName: "pin.fill").font(.system(size: 8)) }
-                    Text(pad.name).lineLimit(1).frame(maxWidth: 140)
+                    if !displayName.isEmpty {
+                        Text(displayName).lineLimit(1).frame(maxWidth: 140)
+                    }
                 }
+
             }
             .buttonStyle(.plain)
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                service.ask(title: text.renamePad, initialName: displayName, from: hostWindow) { name in
+                    guard let name else { return }
+                    service.renamePad(pad.id, to: name)
+                }
+            })
             Button { _ = service.closePad(pad.id) } label: {
                 Image(systemName: "xmark").font(.system(size: 9)).frame(width: 18, height: 22)
             }
@@ -175,16 +183,11 @@ struct ScratchpadWorkspace: View {
     private var writingSurface: some View {
         VStack(spacing: 0) {
             if let pad = service.selectedPad {
-                ScratchpadTitleField(name: pad.name, label: text.renamePad,
-                    onCommit: { service.renamePad(pad.id, to: $0) },
-                    onFocus: { titleFocused = $0 }, onSubmit: { focusEditor() })
-                    .id(pad.id)
-                    .font(.system(size: 20, weight: .semibold))
-                    .padding(.horizontal, 15).padding(.top, 12).padding(.bottom, 3)
                 ZStack(alignment: .topLeading) {
                     ScratchpadEditor(text: service.binding(for: pad.id),
                         fontSize: CGFloat(ScratchpadSupport.sanitizedTextSize(storedTextSize)),
                         textColor: island ? .white : .labelColor, sourceMode: service.isSourceMode,
+                        createsCheckboxOnNewLine: service.createsCheckboxOnNewLine,
                         position: service.editingPositions[pad.id],
                         onPosition: { service.editingPositions[pad.id] = $0 },
                         onCreate: { view in
@@ -293,6 +296,8 @@ struct ScratchpadWorkspace: View {
         Menu {
             if let pad = service.selectedPad { noteActions(pad); Divider() }
             Menu(labels[.checklistTools]) {
+                Toggle(labels[.createCheckboxOnNewLine], isOn: $service.createsCheckboxOnNewLine)
+                Divider()
                 Button(labels[.uncheckAll]) { service.applyChecklist(.uncheckAll, through: editor.view) }
                 Button(labels[.removeCompleted]) { service.applyChecklist(.removeCompleted, through: editor.view) }
             }
@@ -329,7 +334,7 @@ struct ScratchpadWorkspace: View {
 
     private var hostWindow: NSWindow? { editor.view?.window ?? (island ? NotchService.shared.presentationWindow : service.presentationWindow) }
     private func focusEditor() {
-        guard !titleFocused, !searchFocused, let view = editor.view, let window = view.window, window.isKeyWindow else { return }
+        guard !searchFocused, let view = editor.view, let window = view.window, window.isKeyWindow else { return }
         window.makeFirstResponder(view)
     }
     private func present(_ value: Dialog) {
@@ -348,45 +353,5 @@ struct ScratchpadWorkspace: View {
         case .purge(let id):
             service.ask(title: labels[.deleteForever], message: labels[.permanentMessage], destructive: true, from: hostWindow) { _ in service.purgeTrash(id) }
         }
-    }
-}
-
-/// Draft and native field identity belong to one note, including when a folder
-/// browser removes and recreates the writing surface.
-struct ScratchpadTitleField: View {
-    let name: String
-    let label: String
-    let onCommit: (String) -> Void
-    let onFocus: (Bool) -> Void
-    let onSubmit: () -> Void
-    @State private var draft: String
-    @State private var edited = false
-    @FocusState private var focused: Bool
-
-    init(name: String, label: String, onCommit: @escaping (String) -> Void,
-         onFocus: @escaping (Bool) -> Void, onSubmit: @escaping () -> Void) {
-        self.name = name; self.label = label; self.onCommit = onCommit
-        self.onFocus = onFocus; self.onSubmit = onSubmit
-        _draft = State(initialValue: name)
-    }
-
-    var body: some View {
-        TextField(label, text: Binding(get: { draft }, set: { value in
-            guard value != draft else { return }
-            draft = value; edited = true
-        }))
-            .textFieldStyle(.plain).lineLimit(1).focused($focused)
-            .accessibilityLabel(label)
-            .onSubmit { commit(); focused = false; onFocus(false); onSubmit() }
-            .onChange(of: name) { _, value in if !focused { draft = value; edited = false } }
-            .onChange(of: focused) { _, value in onFocus(value); if !value { commit() } }
-            .onDisappear { commit(); onFocus(false) }
-    }
-
-    private func commit() {
-        let proposed = ScratchpadSupport.sanitizedPadName(draft)
-        guard edited, !proposed.isEmpty else { return }
-        edited = false
-        onCommit(proposed)
     }
 }

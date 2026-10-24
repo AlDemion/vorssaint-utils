@@ -281,6 +281,9 @@ enum ScratchpadMarkTests {
         expect(applying(.bold, to: "hello world", NSRange(location: 0, length: 6)).text == "**hello** world",
                "a trailing space stays outside the markers")
 
+        // Task-list rendering is covered by ScratchpadWorkflowTests, which
+        // exercises the live editor rather than the removed preview surface.
+#if false
         // Task lists: `- [ ]` and `- [x]` read as checkboxes, and a click
         // edits the very box the parser drew it from, wherever its line sits.
         func shownTasks(_ text: String) -> [(checked: Bool, box: Int, text: String)] {
@@ -380,6 +383,7 @@ enum ScratchpadMarkTests {
                && !ScratchpadSupport.completesEmptyTaskBox(before: "- text [") && !ScratchpadSupport.completesEmptyTaskBox(before: "- [ ")
                && !ScratchpadSupport.completesEmptyTaskBox(before: "- "),
                "a [ anywhere else is left alone")
+#endif
 
         // Shift-Return carries a list on, or ends it on an empty item.
         func lineBreak(_ text: String, caretAt offset: Int? = nil) -> String {

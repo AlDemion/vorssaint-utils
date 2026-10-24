@@ -29,6 +29,9 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     @Published var search = ""
     @Published var showsSidebar = false
     @Published var isSourceMode = false
+    @Published var createsCheckboxOnNewLine: Bool {
+        didSet { UserDefaults.standard.set(createsCheckboxOnNewLine, forKey: "ScratchpadCreatesCheckboxOnNewLine") }
+    }
     var editingPositions: [UUID: ScratchpadEditorPosition] = [:]
     private let ioQueue = DispatchQueue(label: "com.vorssaint.scratchpad.storage", qos: .utility)
     @Published private(set) var selectedPadID: UUID?
@@ -61,6 +64,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     private(set) var modalInteractionActive = false
 
     private override init() {
+        createsCheckboxOnNewLine = UserDefaults.standard.bool(forKey: "ScratchpadCreatesCheckboxOnNewLine")
         super.init()
         hotkey.onPress = { [weak self] in self?.toggle() }
     }

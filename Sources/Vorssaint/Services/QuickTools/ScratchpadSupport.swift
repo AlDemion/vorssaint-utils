@@ -141,6 +141,64 @@ enum ScratchpadSupport {
             .replacingOccurrences(of: ":", with: "-")
         return "\(safeTitle) \(formatter.string(from: date)).txt"
     }
+
+    static func completesEmptyTaskBox(before text: String) -> Bool {
+        guard text.hasSuffix("[") else { return false }
+        let candidate = text + " ]"
+        return candidate.range(of: #"(?m)^[\s>]*[-*+][ \t]+\[( |x|X)?\]([ \t]|$)"#,
+                              options: .regularExpression) != nil
+    }
+
+    static func lineBreakEdit(in source: String, selection: NSRange) -> ScratchpadMarkEdit {
+        let plain = ScratchpadMarkEdit(range: selection, replacement: "\n",
+                                       selection: NSRange(location: selection.location + 1, length: 0))
+        let whole = source as NSString
+        guard selection.length == 0, selection.location <= whole.length else { return plain }
+        let line = whole.lineRange(for: NSRange(location: selection.location, length: 0))
+        var content = line
+        while content.length > 0,
+              "\n\r".contains(whole.substring(with: NSRange(location: NSMaxRange(content) - 1, length: 1))) {
+            content.length -= 1
+        }
+        let lineText = whole.substring(with: content)
+        let pattern = #"^([ \t>]*)([-+*] |[0-9]+[.)] )(\[[ xX]?\](?:[ \t]+|$))?"#
+        guard let match = try? NSRegularExpression(pattern: pattern).firstMatch(
+            in: lineText, range: NSRange(location: 0, length: (lineText as NSString).length)),
+              selection.location >= content.location + match.range.length else { return plain }
+        let lineNS = lineText as NSString
+        if selection.location == NSMaxRange(content),
+           match.range.length == lineNS.length
+            || lineNS.substring(from: match.range.length).trimmingCharacters(in: .whitespaces).isEmpty {
+            return ScratchpadMarkEdit(range: content, replacement: "",
+                                      selection: NSRange(location: content.location, length: 0))
+        }
+        let prefix = lineNS.substring(with: match.range(at: 1))
+        let marker = lineNS.substring(with: match.range(at: 2))
+        let hasBox = match.range(at: 3).location != NSNotFound
+        var next = marker
+        let numberMarker = marker.trimmingCharacters(in: .whitespaces)
+        if let number = Int(numberMarker.dropLast()), number < Int.max,
+           let delimiter = numberMarker.last {
+            next = "\(number + 1)\(delimiter) "
+        }
+        let replacement = "\n" + prefix + next + (hasBox ? "[ ] " : "")
+        return ScratchpadMarkEdit(range: selection, replacement: replacement,
+                                  selection: NSRange(location: selection.location
+                                    + (replacement as NSString).length, length: 0))
+    }
+
+    static func taskToggleEdit(box: Int, in source: String) -> ScratchpadMarkEdit? {
+        guard let task = ScratchpadMarkdown(source).tasks.first(where: { $0.marker.location == box }) else {
+            return nil
+        }
+        return .init(range: NSRange(location: box + 1, length: 1),
+                     replacement: task.checked ? " " : "x",
+                     selection: NSRange(location: box, length: 0))
+    }
+
+    static func requiresCloseConfirmation(_ pad: ScratchpadPad) -> Bool {
+        !pad.text.isEmpty
+    }
 }
 
 /// A mark the formatting toolbar can apply. Each one is written as the
@@ -210,6 +268,8 @@ struct ScratchpadMarkEdit: Equatable {
     let range: NSRange
     let replacement: String
     let selection: NSRange
+
+    var caret: Int { selection.location }
 }
 
 extension ScratchpadSupport {

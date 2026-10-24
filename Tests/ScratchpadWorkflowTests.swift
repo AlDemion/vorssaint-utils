@@ -73,10 +73,10 @@ enum ScratchpadWorkflowTests {
                      "new notes use the first meaningful line without Markdown markers")
         document.updateSelectedText("# 明日の買い物\n- [ ] Milk", modifiedAt: now)
         suite.expect(document.pads[0].name == "明日の買い物", "automatic titles follow edits in any writing language")
-        suite.expect(ScratchpadMarkdown.suggestedTitle(in: "\n- [ ] \n- **Buy milk**") == "Buy milk"
-                     && ScratchpadMarkdown.suggestedTitle(in: "[Plan](https://example.com)") == "Plan"
+        suite.expect(ScratchpadMarkdown.suggestedTitle(in: "\n- [ ] \n- **Buy milk**") == nil
+                     && ScratchpadMarkdown.suggestedTitle(in: "[Plan](https://example.com)") == nil
                      && ScratchpadMarkdown.suggestedTitle(in: "# ***Strong title***") == "Strong title",
-                     "automatic titles skip empty checkboxes and use link labels")
+                     "automatic titles come from an explicit top-level heading")
         document = document.renaming(id, to: "My list")!
         document.updateSelectedText("# Changed heading\n- [x] Milk", modifiedAt: now)
         suite.expect(document.pads[0].name == "My list" && !document.pads[0].usesAutomaticTitle,
@@ -180,6 +180,9 @@ enum ScratchpadWorkflowTests {
         let empty = ScratchpadMarkdown.continueList(in: "- [ ] ", selection: NSRange(location: 6, length: 0))!
         suite.expect(empty.replacement.isEmpty && empty.range.length == 6, "Return on an empty item ends the list")
         suite.expect(ScratchpadMarkdown.continueList(in: "9. Task", selection: NSRange(location: 7, length: 0))?.replacement == "\n10. ", "numbered list continuation increments its number")
+        suite.expect(ScratchpadMarkdown.continueList(in: "Task", selection: NSRange(location: 4, length: 0),
+                                                     createCheckboxOnNewLine: true)?.replacement == "\n- [ ] ",
+                     "checklist mode creates a checkbox on a new line")
         suite.expect(ScratchpadMarkdown.continueList(in: "```\n- item\n```", selection: NSRange(location: 10, length: 0)) == nil, "Return inside code stays literal")
         let indent = ScratchpadMarkdown.indentList(in: "- a\n- b", selection: NSRange(location: 0, length: 7), outdent: false)!
         suite.expect(indent.replacement == "    - a\n    - b", "Tab indents every selected item")
@@ -222,9 +225,11 @@ enum ScratchpadWorkflowTests {
             if !state.browsing { title(for: state.selected) }
         }
         private func title(for index: Int) -> some View {
-            ScratchpadTitleField(name: state.names[index], label: "Title",
-                onCommit: { state.names[index] = $0; state.commits += 1 }, onFocus: { _ in }, onSubmit: {})
-                .id(index).font(.system(size: 20, weight: .semibold))
+            TextField("Title", text: Binding(
+                get: { state.names[index] },
+                set: { state.names[index] = $0; state.commits += 1 }
+            ))
+            .id(index).font(.system(size: 20, weight: .semibold))
         }
     }
     private static func nativeTitle(_ suite: TestSuite) {

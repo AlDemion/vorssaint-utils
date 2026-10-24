@@ -8,12 +8,15 @@ enum ScratchpadLibraryLabel: Int, CaseIterable {
     case pin, unpin, temporary, source, sidebar, search, delete, restore, emptyTrash
     case deleteForever, permanentMessage, importNotes, backup, restoreBackup, exportFolder
     case replaceMessage, folderMessage, liveEditing, failed
-    case duplicate, checklistTools, uncheckAll, removeCompleted
+    case duplicate, checklistTools, uncheckAll, removeCompleted, createCheckboxOnNewLine
 }
 
 struct ScratchpadLibraryStrings {
     let language: AppLanguage
-    subscript(_ label: ScratchpadLibraryLabel) -> String { Self.translations[language]![label.rawValue] }
+    subscript(_ label: ScratchpadLibraryLabel) -> String {
+        if label == .createCheckboxOnNewLine { return "Create checkbox upon new line" }
+        return Self.translations[language]![label.rawValue]
+    }
 
     private static let translations: [AppLanguage: [String]] = [
         .enUS: ["Inbox", "All notes", "Pinned", "Trash", "Folders", "New folder", "Rename folder", "Delete folder", "Move to folder", "Pin note", "Unpin note", "Temporary note", "Markdown source", "Browse notes", "Search notes", "Move to Trash", "Restore", "Empty Trash", "Delete permanently", "Permanently delete these notes? This cannot be undone.", "Import notes", "Back up Scratchpad", "Restore Scratchpad backup", "Export folder as Markdown", "Replace your notes with this backup? A recovery copy of your current notes will be saved first.", "The notes in this folder will move to Inbox.", "Live Markdown", "The operation could not be completed. Your existing notes were preserved.", "Duplicate note", "Checklist", "Uncheck all", "Remove completed items"],
