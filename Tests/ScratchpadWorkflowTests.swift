@@ -58,7 +58,7 @@ enum ScratchpadWorkflowTests {
         titlesAndDuplicates(suite, now: now)
         markdown(suite)
         nativeEditor(suite)
-        nativeTitle(suite)
+        nativeNavigation(suite)
         for language in AppLanguage.allCases {
             let labels = ScratchpadLibraryStrings(language: language)
             suite.expect(ScratchpadLibraryLabel.allCases.allSatisfy { !labels[$0].isEmpty }, "all Scratchpad labels exist for \(language)")
@@ -213,79 +213,87 @@ enum ScratchpadWorkflowTests {
     }
 
     private final class EditorState: ObservableObject { @Published var text = "# Heading\n\n- [ ] First\n- [x] Second"; @Published var source = false }
-    private final class TitleState: ObservableObject {
-        @Published var names = ["First note", "Second note"]
+    private struct Fixture: View {
+        @ObservedObject var state: EditorState
+        var body: some View { ScratchpadEditor(text: $state.text, sourceMode: state.source) }
+    }
+    private final class NavigationState: ObservableObject {
+        @Published var texts = ["First note", "Second note"]
         @Published var selected = 0
         @Published var browsing = false
-        var commits = 0
+        let ids = [UUID(), UUID()]
+        let sessions = ScratchpadEditor.Sessions()
     }
-    private struct TitleFixture: View {
-        @ObservedObject var state: TitleState
+    private struct NavigationFixture: View {
+        @ObservedObject var state: NavigationState
         var body: some View {
-            if !state.browsing { title(for: state.selected) }
-        }
-        private func title(for index: Int) -> some View {
-            TextField("Title", text: Binding(
-                get: { state.names[index] },
-                set: { state.names[index] = $0; state.commits += 1 }
-            ))
-            .id(index).font(.system(size: 20, weight: .semibold))
+            if !state.browsing {
+                ScratchpadEditor(text: $state.texts[state.selected],
+                                 session: state.sessions.session(for: state.ids[state.selected]))
+                    .id(state.selected)
+            }
         }
     }
-    private static func nativeTitle(_ suite: TestSuite) {
-        let state = TitleState()
-        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 430, height: 50),
+    private static func nativeNavigation(_ suite: TestSuite) {
+        let state = NavigationState()
+        let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 430, height: 300),
                               styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        let host = NSHostingView(rootView: TitleFixture(state: state))
+        let host = NSHostingView(rootView: NavigationFixture(state: state))
         window.contentView = host
-        host.frame = NSRect(x: 0, y: 0, width: 430, height: 50)
         defer { window.contentView = nil }
         func settle() {
             for _ in 0..<8 { host.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01)) }
         }
-        func field(_ view: NSView) -> NSTextField? {
-            if let field = view as? NSTextField { return field }
-            return view.subviews.compactMap(field).first
+        func findEditor(_ view: NSView) -> ScratchpadEditor.TextView? {
+            (view as? ScratchpadEditor.TextView) ?? view.subviews.compactMap(findEditor).first
         }
         settle()
-        state.names[0] = "Automatic title"
+        guard let first = findEditor(host) else { suite.expect(false, "first cached editor exists"); return }
+        window.makeFirstResponder(first)
+        first.setSelectedRange(NSRange(location: 0, length: 0))
+        first.insertText("A ", replacementRange: first.selectedRange())
+        first.breakUndoCoalescing()
         settle()
+        state.selected = 1
+        settle()
+        guard let second = findEditor(host) else { suite.expect(false, "second cached editor exists"); return }
+        window.makeFirstResponder(second)
+        second.setSelectedRange(NSRange(location: 0, length: 0))
+        second.insertText("B ", replacementRange: second.selectedRange())
+        second.breakUndoCoalescing()
+        settle()
+        state.selected = 0
+        settle()
+        suite.expect(findEditor(host) === first && first.undoManager !== second.undoManager,
+                     "switching notes reuses the native editor with a separate undo history per note")
+        first.undoManager?.undo()
+        settle()
+        suite.expect(state.texts == ["First note", "B Second note"], "undo after switching changes only the selected note")
         state.browsing = true
         settle()
         state.browsing = false
         settle()
-        suite.expect(state.commits == 0 && field(host)?.stringValue == "Automatic title",
-                     "automatic title refreshes and browser recreation never claim manual title ownership")
-        guard let first = field(host) else { suite.expect(false, "native title field exists"); return }
-        window.makeFirstResponder(first)
-        window.makeFirstResponder(nil)
+        first.undoManager?.redo()
         settle()
-        suite.expect(state.commits == 0, "focusing and leaving an untouched title never freezes its automatic name")
-        window.makeFirstResponder(first)
-        if let input = first.currentEditor() {
-            input.selectAll(nil)
-            input.insertText("First draft")
-        }
+        suite.expect(findEditor(host) === first && state.texts == ["A First note", "B Second note"],
+                     "opening and closing the library preserves the editor and redo history")
+        state.texts[0] = "Restored externally"
         settle()
+        suite.expect(first.string == "Restored externally" && first.undoManager?.canUndo == false,
+                     "external document replacement clears obsolete undo history")
         state.selected = 1
         settle()
-        suite.expect(state.names[0] == "First draft" && state.names[1] == "Second note"
-                     && field(host)?.stringValue == "Second note", "switching tabs commits a title draft to its own note")
-        for index in 0..<4 {
-            state.browsing = true
-            settle()
-            state.selected = index % 2
-            state.browsing = false
-            settle()
-            suite.expect(field(host)?.stringValue == state.names[state.selected]
-                         && field(host)?.font?.pointSize == 20,
-                         "folder browsing and tab changes recreate a consistent title field")
-        }
-    }
-    private struct Fixture: View {
-        @ObservedObject var state: EditorState
-        var body: some View { ScratchpadEditor(text: $state.text, sourceMode: state.source) }
+        second.undoManager?.undo()
+        settle()
+        suite.expect(state.texts == ["Restored externally", "Second note"], "the other note keeps its independent undo history")
+        state.browsing = true
+        settle()
+        state.sessions.retain([])
+        state.browsing = false
+        settle()
+        suite.expect(findEditor(host) !== second && findEditor(host)?.undoManager?.canUndo == false,
+                     "closing notes releases cached editing sessions")
     }
     private static func nativeEditor(_ suite: TestSuite) {
         _ = NSApplication.shared

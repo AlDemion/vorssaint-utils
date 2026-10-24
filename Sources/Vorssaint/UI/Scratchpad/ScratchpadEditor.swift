@@ -18,23 +18,50 @@ struct ScratchpadEditor: NSViewRepresentable {
     var sourceMode = false
     var createsCheckboxOnNewLine = false
     var position: ScratchpadEditorPosition?
+    var session: Session?
     var onPosition: ((ScratchpadEditorPosition) -> Void)?
     var onCreate: ((NSTextView) -> Void)?
+    var onDismantle: ((NSTextView) -> Void)?
     var onFormattingChange: ((Set<ScratchpadMark>) -> Void)?
+
+    /// Keep visited open notes alive when SwiftUI switches tabs or shows the library.
+    final class Sessions {
+        private var notes: [UUID: Session] = [:]
+        func session(for id: UUID) -> Session {
+            if let session = notes[id] { return session }
+            let session = Session()
+            notes[id] = session
+            return session
+        }
+        func retain(_ ids: Set<UUID>) { notes = notes.filter { ids.contains($0.key) } }
+    }
+
+    final class Session {
+        fileprivate var scroll: NSScrollView?
+        deinit { (scroll?.documentView as? TextView)?.undoManager?.removeAllActions() }
+    }
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let storage = NSTextStorage()
-        let layout = NSLayoutManager()
-        let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
-        container.widthTracksTextView = true
-        container.lineFragmentPadding = 5
-        storage.addLayoutManager(layout)
-        layout.addTextContainer(container)
-        let view = TextView(frame: .zero, textContainer: container)
-        let scroll = NSScrollView()
-        scroll.documentView = view
+        let scroll: NSScrollView
+        let view: TextView
+        if let cached = session?.scroll, let cachedView = cached.documentView as? TextView {
+            scroll = cached
+            view = cachedView
+        } else {
+            let storage = NSTextStorage()
+            let layout = NSLayoutManager()
+            let container = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+            container.widthTracksTextView = true
+            container.lineFragmentPadding = 5
+            storage.addLayoutManager(layout)
+            layout.addTextContainer(container)
+            view = TextView(frame: .zero, textContainer: container)
+            scroll = NSScrollView()
+            scroll.documentView = view
+            session?.scroll = scroll
+        }
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -58,7 +85,10 @@ struct ScratchpadEditor: NSViewRepresentable {
         view.isAutomaticDataDetectionEnabled = false
         view.smartInsertDeleteEnabled = false
         view.textContainerInset = NSSize(width: 10, height: 10)
-        view.string = text
+        if view.string != text {
+            view.string = text
+            view.undoManager?.removeAllActions()
+        }
         view.sourceMode = sourceMode
         view.delegate = context.coordinator
         view.layoutManager?.delegate = context.coordinator
@@ -110,12 +140,19 @@ struct ScratchpadEditor: NSViewRepresentable {
 
     static func dismantleNSView(_ scroll: NSScrollView, coordinator: Coordinator) {
         coordinator.publishPosition()
+        coordinator.view?.breakUndoCoalescing()
+        if let view = coordinator.view { coordinator.parent.onDismantle?(view) }
         if let observer = coordinator.scrollObserver { NotificationCenter.default.removeObserver(observer) }
+        coordinator.buttons.forEach { $0.removeFromSuperview() }
+        coordinator.buttons = []
+        coordinator.view?.onLayout = nil
         coordinator.view?.delegate = nil
         coordinator.view?.layoutManager?.delegate = nil
     }
 
     final class TextView: NSTextView {
+        private let noteUndoManager = UndoManager()
+        override var undoManager: UndoManager? { noteUndoManager }
         var sourceMode = false
         var onLayout: (() -> Void)?
         override func layout() { super.layout(); onLayout?() }
@@ -150,7 +187,7 @@ struct ScratchpadEditor: NSViewRepresentable {
         private var analysis = ScratchpadMarkdown("")
         private var analyzedText: String?
         private var hidden: [NSRange] = []
-        private var buttons: [NSButton] = []
+        fileprivate var buttons: [NSButton] = []
         private var renderedAppearance: String?
         private var publishedMarks: Set<ScratchpadMark>?
 

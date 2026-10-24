@@ -15,6 +15,7 @@ struct ScratchpadWorkspace: View {
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.scratchpadTextSize) private var storedTextSize = ScratchpadSupport.defaultTextSize
     @State private var editor = EditorHandle()
+    @State private var editorSessions = ScratchpadEditor.Sessions()
     @State private var activeMarks = Set<ScratchpadMark>()
     @State private var copied = false
     @State private var pendingFind: NSTextFinder.Action?
@@ -54,6 +55,9 @@ struct ScratchpadWorkspace: View {
         .foregroundStyle(island ? Color.white : Color.primary)
         .onChange(of: service.selectedPadID) { _, _ in
             DispatchQueue.main.async { focusEditor() }
+        }
+        .onChange(of: service.pads.map(\.id)) { _, ids in
+            editorSessions.retain(Set(ids))
         }
         .onReceive(NotificationCenter.default.publisher(for: .scratchpadFocusSearch)) { _ in
             guard hostWindow?.isKeyWindow == true else { return }
@@ -189,6 +193,7 @@ struct ScratchpadWorkspace: View {
                         textColor: island ? .white : .labelColor, sourceMode: service.isSourceMode,
                         createsCheckboxOnNewLine: service.createsCheckboxOnNewLine,
                         position: service.editingPositions[pad.id],
+                        session: editorSessions.session(for: pad.id),
                         onPosition: { service.editingPositions[pad.id] = $0 },
                         onCreate: { view in
                             if !island { service.registerTextView(view) }
@@ -199,6 +204,11 @@ struct ScratchpadWorkspace: View {
                                     pendingFind = nil
                                     service.performFind(action, in: view)
                                 } else { focusEditor() }
+                            }
+                        },
+                        onDismantle: { view in
+                            DispatchQueue.main.async {
+                                if editor.view === view { editor = EditorHandle() }
                             }
                         },
                         onFormattingChange: { marks in
@@ -298,10 +308,12 @@ struct ScratchpadWorkspace: View {
             Menu(labels[.checklistTools]) {
                 Toggle(labels[.createCheckboxOnNewLine], isOn: $service.createsCheckboxOnNewLine)
                 Divider()
-                Button(labels[.uncheckAll]) { service.applyChecklist(.uncheckAll, through: editor.view) }
-                Button(labels[.removeCompleted]) { service.applyChecklist(.removeCompleted, through: editor.view) }
+                Group {
+                    Button(labels[.uncheckAll]) { service.applyChecklist(.uncheckAll, through: editor.view) }
+                    Button(labels[.removeCompleted]) { service.applyChecklist(.removeCompleted, through: editor.view) }
+                }
+                .disabled(editor.view == nil || !ScratchpadMarkdown(service.text).tasks.contains(where: \.checked))
             }
-            .disabled(editor.view == nil || !ScratchpadMarkdown(service.text).tasks.contains(where: \.checked))
             Divider()
             Button(labels[.importNotes]) { service.importNotes(from: hostWindow) }
             Button(text.exportAction) { service.exportText(suggestedName: ScratchpadSupport.exportFileName(title: service.selectedPadName, date: Date()).replacingOccurrences(of: ".txt", with: ".md"), from: hostWindow) }
