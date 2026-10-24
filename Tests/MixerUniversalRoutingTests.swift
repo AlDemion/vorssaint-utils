@@ -147,6 +147,25 @@ enum MixerUniversalRoutingContract {
                          "\(id) can resume after protection without an old build cancelling its replacement")
         }
 
+        for id in ["com.hnc.Discord", "com.microsoft.teams2"] {
+            for bypassed in [false, true] {
+                for (firstSupports, secondSupports) in [(true, true), (true, false), (false, true)] {
+                    let mixer = Mixer()
+                    var first = row(id, persistenceID: id, bypassed: bypassed)
+                    var second = row(id, objects: [101], persistenceID: id, bypassed: bypassed)
+                    first.supportsVolumeOverride = firstSupports
+                    second.supportsVolumeOverride = secondSupports
+                    mixer.apps = Mixer.coalescingAppsWithDuplicateIDs([first, second])
+                    suite.expect(mixer.apps.count == 1 && mixer.apps[0].supportsVolumeOverride,
+                                 "\(id) keeps its volume control option after combining owner processes")
+                    mixer.setCallAppVolumeControl(bypassed, for: mixer.apps[0])
+                    suite.expect(mixer.apps[0].isBypassed != bypassed
+                                 && mixer.applied.last == mixer.apps[0],
+                                 "\(id) can change call protection after combining rows, bypassed: \(bypassed)")
+                }
+            }
+        }
+
         let mixer = Mixer()
         let zoom = row("us.zoom.xos", persistenceID: "us.zoom.xos", bypassed: true)
         mixer.apps = [zoom]

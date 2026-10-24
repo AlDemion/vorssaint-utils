@@ -1574,6 +1574,7 @@ final class AppVolumeMixer: ObservableObject {
                                      audioObjects: audioObjects,
                                      isPlaying: existing.isPlaying || app.isPlaying,
                                      isBypassed: existing.isBypassed || app.isBypassed,
+                                     supportsVolumeOverride: existing.supportsVolumeOverride || app.supportsVolumeOverride,
                                      universalOutputRouteUID: existing.universalOutputRouteUID ?? app.universalOutputRouteUID,
                                      selectedOutputDeviceUID: existing.selectedOutputDeviceUID,
                                      effectiveOutputDeviceUID: existing.effectiveOutputDeviceUID,
