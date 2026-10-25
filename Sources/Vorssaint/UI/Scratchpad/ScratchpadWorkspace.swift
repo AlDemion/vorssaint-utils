@@ -19,6 +19,8 @@ struct ScratchpadWorkspace: View {
     @State private var editor = EditorHandle()
     @State private var editorSessions = ScratchpadEditor.Sessions()
     @State private var activeMarks = Set<ScratchpadMark>()
+    @State private var calculatedInput: CalculationInput?
+    @State private var calculation: ScratchpadCalculationEvaluator.Result?
     @State private var copied = false
     @State private var pendingFind: NSTextFinder.Action?
     @FocusState private var searchFocused: Bool
@@ -29,6 +31,18 @@ struct ScratchpadWorkspace: View {
         weak var view: NSTextView?
         init(view: NSTextView? = nil) { self.view = view }
     }
+    private struct CalculationInput: Equatable, Sendable {
+        let noteID: UUID
+        let source: String
+        let rates: ScratchpadCurrencyRates
+        let locale: Locale
+    }
+
+    private var calculationInput: CalculationInput? {
+        guard let pad = service.selectedPad, pad.calculationMode else { return nil }
+        return CalculationInput(noteID: pad.id, source: pad.text, rates: exchangeRates.rates, locale: .current)
+    }
+
     private enum Dialog {
         case newFolder, renameFolder(UUID), deleteFolder(UUID), purge(UUID?)
     }
@@ -81,6 +95,26 @@ struct ScratchpadWorkspace: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .scratchpadFind)) { notification in
             performFind(notification)
+        }
+        .task(id: calculationInput) {
+            guard let input = calculationInput else {
+                calculation = nil
+                calculatedInput = nil
+                return
+            }
+            let evaluation = Task.detached(priority: .userInitiated) {
+                ScratchpadCalculationEvaluator.evaluate(input.source, currencyRates: input.rates,
+                    decimalSeparator: input.locale.decimalSeparator ?? ".",
+                    groupingSeparator: input.locale.groupingSeparator ?? ",", locale: input.locale)
+            }
+            let result = await withTaskCancellationHandler {
+                await evaluation.value
+            } onCancel: {
+                evaluation.cancel()
+            }
+            guard !Task.isCancelled else { return }
+            calculation = result
+            calculatedInput = input
         }
         .task(id: copied) {
             guard copied else { return }
@@ -234,14 +268,12 @@ struct ScratchpadWorkspace: View {
     private var writingSurface: some View {
         VStack(spacing: 0) {
             if let pad = service.selectedPad {
-                let calculation = pad.calculationMode
-                    ? ScratchpadCalculationEvaluator.evaluate(pad.text, currencyRates: exchangeRates.rates)
-                    : nil
+                let answers = calculatedInput == calculationInput ? calculation?.lines.map(\.formatted) ?? [] : []
                 ZStack(alignment: .topLeading) {
                     ScratchpadEditor(text: service.binding(for: pad.id),
                         fontSize: CGFloat(ScratchpadSupport.sanitizedTextSize(storedTextSize)),
                         textColor: island ? .white : .labelColor, sourceMode: service.isSourceMode,
-                        calculationResults: calculation?.lines.map(\.formatted) ?? [],
+                        calculationResults: answers,
                         calculationColumnWidth: pad.calculationMode ? (island ? 96 : 110) : 0,
                         createsCheckboxOnNewLine: service.createsCheckboxOnNewLine,
                         position: service.editingPositions[pad.id],

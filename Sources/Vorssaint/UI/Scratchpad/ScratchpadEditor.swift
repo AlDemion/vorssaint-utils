@@ -196,10 +196,14 @@ struct ScratchpadEditor: NSViewRepresentable {
         }
         var calculationResults: [String?] = [] {
             didSet {
-                if calculationResults != oldValue { needsDisplay = true }
+                if calculationResults != oldValue {
+                    needsDisplay = true
+                    NSAccessibility.post(element: self, notification: .layoutChanged)
+                }
             }
         }
         private var cachedLineStarts: [Int]?
+        private var accessibleAnswers: [Int: NSAccessibilityElement] = [:]
         var onLayout: (() -> Void)?
         override func layout() { super.layout(); onLayout?() }
 
@@ -212,6 +216,39 @@ struct ScratchpadEditor: NSViewRepresentable {
             cachedLineStarts = nil
         }
 
+        private func calculationLineRect(at index: Int) -> NSRect? {
+            guard let manager = layoutManager, textContainer != nil else { return nil }
+            let starts = cachedLineStarts ?? ScratchpadEditorLayout.lineStartLocations(in: string)
+            cachedLineStarts = starts
+            guard index < starts.count, starts[index] < (string as NSString).length else { return nil }
+            manager.ensureLayout(forCharacterRange: NSRange(location: starts[index], length: 1))
+            let glyph = manager.glyphIndexForCharacter(at: starts[index])
+            guard glyph < manager.numberOfGlyphs else { return nil }
+            return manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+                .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        }
+
+        override func accessibilityChildren() -> [Any]? {
+            var children = super.accessibilityChildren() ?? []
+            guard calculationColumnWidth > 0 else { accessibleAnswers = [:]; return children }
+            accessibleAnswers = accessibleAnswers.filter { $0.key < calculationResults.count && calculationResults[$0.key] != nil }
+            let source = ScratchpadCalculationEvaluator.lines(in: string)
+            for (index, answer) in calculationResults.enumerated() {
+                guard index < source.count, let answer, !answer.isEmpty,
+                      let line = calculationLineRect(at: index) else { continue }
+                let rect = NSRect(x: bounds.width - textContainerInset.width - calculationColumnWidth,
+                                  y: line.minY, width: calculationColumnWidth, height: line.height)
+                let element = accessibleAnswers[index] ?? NSAccessibilityElement()
+                element.setAccessibilityRole(.staticText)
+                element.setAccessibilityLabel("\(source[index]) = \(answer)")
+                element.setAccessibilityParent(self)
+                element.setAccessibilityFrameInParentSpace(rect)
+                accessibleAnswers[index] = element
+                children.append(element)
+            }
+            return children
+        }
+
         /// Answers are painted in the margin the paragraph tail indent keeps
         /// free. Drawing here rather than in a sibling view means the answers
         /// scroll, wrap and follow the note without a second scroll position.
@@ -222,11 +259,7 @@ struct ScratchpadEditor: NSViewRepresentable {
 
         private func drawCalculationResults(in dirtyRect: NSRect) {
             guard calculationColumnWidth > 0, !calculationResults.isEmpty,
-                  let manager = layoutManager, textContainer != nil else { return }
-            let length = (string as NSString).length
-            guard length > 0 else { return }
-            let starts = cachedLineStarts ?? ScratchpadEditorLayout.lineStartLocations(in: string)
-            cachedLineStarts = starts
+                  textContainer != nil else { return }
             let pointSize = max(10, (font?.pointSize ?? 13) - 1)
             let answerFont = NSFont.monospacedDigitSystemFont(ofSize: pointSize, weight: .regular)
             let attributes: [NSAttributedString.Key: Any] = [
@@ -237,13 +270,9 @@ struct ScratchpadEditor: NSViewRepresentable {
             let rightEdge = bounds.width - textContainerInset.width - 2
             let availableWidth = max(1, min(calculationColumnWidth - 4, rightEdge - origin.x))
             for (index, answer) in calculationResults.enumerated() {
-                guard index < starts.count, starts[index] < length,
-                      let answer, !answer.isEmpty else { continue }
-                let character = starts[index]
-                let glyph = manager.glyphIndexForCharacter(at: character)
-                guard glyph < manager.numberOfGlyphs else { continue }
-                let line = manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-                let y = origin.y + line.minY
+                guard let answer, !answer.isEmpty,
+                      let line = calculationLineRect(at: index) else { continue }
+                let y = line.minY
                 if y > dirtyRect.maxY { break }
                 guard y + line.height >= dirtyRect.minY else { continue }
                 var size = (answer as NSString).size(withAttributes: attributes)

@@ -86,7 +86,7 @@ enum ScratchpadExchangeRateCache {
 }
 
 enum ScratchpadExchangeRateRedirect {
-    static let host = "api.frankfurter.app"
+    static let host = "api.frankfurter.dev"
 
     /// The rate request may only hop within its own HTTPS host. A redirect to
     /// another address is treated as a failed download, never followed.
@@ -120,32 +120,56 @@ enum ScratchpadExchangeRateHTTP {
             "User-Agent": "Vorssaint/\(version) (https://github.com/vorssaint/vorssaint-utils)",
             "Accept": "application/json",
         ]
-        let redirects = Redirects()
-        let session = URLSession(configuration: configuration, delegate: redirects, delegateQueue: nil)
-        let task = session.dataTask(with: request) { data, response, error in
-            defer { session.finishTasksAndInvalidate() }
-            if let error {
-                completion(.failure(error))
-                return
-            }
-            guard let http = response as? HTTPURLResponse else {
-                completion(.failure(Failure.invalidResponse))
-                return
-            }
-            guard let data else {
-                completion(.failure(Failure.invalidResponse))
-                return
-            }
-            guard data.count <= 512 * 1024 else {
-                completion(.failure(Failure.tooLarge))
-                return
-            }
-            completion(.success((data, http)))
-        }
-        task.resume()
+        load(request, configuration: configuration, completion: completion)
     }
 
-    private final class Redirects: NSObject, URLSessionTaskDelegate {
+    static func load(_ request: URLRequest, configuration: URLSessionConfiguration,
+                     completion: @escaping (Result<(Data, HTTPURLResponse), Error>) -> Void) {
+        let download = Download(completion: completion)
+        let session = URLSession(configuration: configuration, delegate: download, delegateQueue: nil)
+        session.dataTask(with: request).resume()
+    }
+
+    // URLSession delivers this delegate's callbacks on one serial queue.
+    private final class Download: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+        private var data = Data()
+        private var completion: ((Result<(Data, HTTPURLResponse), Error>) -> Void)?
+        private let limit = 512 * 1024
+
+        init(completion: @escaping (Result<(Data, HTTPURLResponse), Error>) -> Void) {
+            self.completion = completion
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask,
+                        didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+            if response.expectedContentLength > limit {
+                finish(.failure(Failure.tooLarge))
+                completionHandler(.cancel)
+            } else { completionHandler(.allow) }
+        }
+
+        func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive chunk: Data) {
+            guard chunk.count <= limit - data.count else {
+                finish(.failure(Failure.tooLarge))
+                dataTask.cancel()
+                return
+            }
+            data.append(chunk)
+        }
+
+        func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+            defer { session.finishTasksAndInvalidate() }
+            if let error { finish(.failure(error)) }
+            else if let response = task.response as? HTTPURLResponse { finish(.success((data, response))) }
+            else { finish(.failure(Failure.invalidResponse)) }
+        }
+
+        private func finish(_ result: Result<(Data, HTTPURLResponse), Error>) {
+            let callback = completion
+            completion = nil
+            callback?(result)
+        }
+
         func urlSession(_ session: URLSession, task: URLSessionTask,
                         willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest,
@@ -202,7 +226,7 @@ final class ScratchpadExchangeRateService: ObservableObject {
     }
 
     static var request: URLRequest {
-        var components = URLComponents(string: "https://\(ScratchpadExchangeRateRedirect.host)/latest")!
+        var components = URLComponents(string: "https://\(ScratchpadExchangeRateRedirect.host)/v1/latest")!
         let symbols = ScratchpadCurrency.supportedSymbols
             .subtracting([ScratchpadExchangeRateParser.expectedBase.lowercased()])
             .map { $0.uppercased() }

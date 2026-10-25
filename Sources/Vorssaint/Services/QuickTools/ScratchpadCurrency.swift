@@ -6,7 +6,7 @@ import Foundation
 /// Exchange rates for calculation mode. The date is the rate provider's own
 /// calendar date, not the day the download happened, so a weekend rate still
 /// reads as Friday. An empty date marks the copy that ships with the app.
-struct ScratchpadCurrencyRates: Codable, Equatable {
+struct ScratchpadCurrencyRates: Codable, Equatable, Sendable {
     let date: String
     let base: String
     let rates: [String: Double]
@@ -89,14 +89,18 @@ enum ScratchpadCurrency {
                                  groupingSeparator: groupingSeparator),
               let converted = rates.convert(value: value, from: tokens[1], to: tokens[3]),
               converted.isFinite else { return nil }
+        return (converted, format(converted, in: tokens[3], locale: locale))
+    }
+
+    static func format(_ value: Double, in symbol: String, locale: Locale) -> String {
         let formatter = NumberFormatter()
         formatter.locale = locale
         formatter.numberStyle = .decimal
         formatter.usesGroupingSeparator = true
         formatter.minimumFractionDigits = 0
-        formatter.maximumFractionDigits = zeroDecimalCurrencies.contains(tokens[3]) ? 0 : 2
-        let formatted = formatter.string(from: NSNumber(value: converted)) ?? String(converted)
-        return (converted, "\(formatted) \(tokens[3].uppercased())")
+        formatter.maximumFractionDigits = zeroDecimalCurrencies.contains(symbol.lowercased()) ? 0 : 2
+        let formatted = formatter.string(from: NSNumber(value: value)) ?? String(value)
+        return "\(formatted) \(symbol.uppercased())"
     }
 
     /// Currencies conventionally written without a fractional part, so a yen
