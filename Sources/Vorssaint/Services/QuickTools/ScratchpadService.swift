@@ -357,6 +357,14 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
+    func toggleCalculationMode(_ id: UUID) {
+        changeDocument { next in
+            if let index = next.pads.firstIndex(where: { $0.id == id }) {
+                next.pads[index].calculationMode.toggle()
+            }
+        }
+    }
+
     func deletePad(_ id: UUID) {
         changeDocument { $0.trash(id, now: Date(), defaultName: FeatureStrings.scratchpad(L10n.shared.language).pageTitle) }
     }

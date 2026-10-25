@@ -10,6 +10,7 @@ enum ScratchpadLibraryLabel: Int, CaseIterable {
     case replaceMessage, folderMessage, liveEditing, failed
     case duplicate, checklistTools, uncheckAll, removeCompleted, createCheckboxOnNewLine
     case previousNote, nextNote
+    case calculationMode
 }
 
 struct ScratchpadLibraryStrings {
@@ -20,8 +21,17 @@ struct ScratchpadLibraryStrings {
             let pair = Self.navigation[language]!
             return label == .previousNote ? pair.0 : pair.1
         }
+        if label == .calculationMode { return Self.calculation[language] ?? "Calculation mode" }
         return Self.translations[language]![label.rawValue]
     }
+
+    private static let calculation: [AppLanguage: String] = [
+        .enUS: "Calculation mode", .ptBR: "Modo de cálculo", .es: "Modo de cálculo",
+        .fr: "Mode calcul", .de: "Berechnungsmodus", .it: "Modalità calcolo",
+        .ja: "計算モード", .ko: "계산 모드", .zhHans: "计算模式", .zhTW: "計算模式",
+        .zhHK: "計算模式", .tr: "Hesaplama modu", .ru: "Режим вычислений",
+        .uk: "Режим обчислень", .sk: "Režim výpočtov",
+    ]
 
     private static let navigation: [AppLanguage: (String, String)] = [
         .enUS: ("Previous note", "Next note"),

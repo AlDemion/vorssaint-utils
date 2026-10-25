@@ -97,6 +97,17 @@ enum ScratchpadWorkflowTests {
                      "calculation mode resolves variables with comma-decimal locales")
         suite.expect(ScratchpadCalculationEvaluator.evaluate("prev + 1").lines.allSatisfy { $0.value == nil },
                      "history references stay plain text until a value exists")
+
+        var document = ScratchpadDocument.initial(defaultName: "Notes")
+        document.pads[0].calculationMode = true
+        let encoded = document.encoded()
+        suite.expect(ScratchpadDocument.decoded(encoded, defaultName: "Notes")?.pads[0].calculationMode == true,
+                     "calculation mode persists on a pad")
+        let legacy = """
+        {"schemaVersion":2,"pads":[{"id":"\(document.pads[0].id)","name":"Notes","text":"","modifiedAt":null}],"selectedID":"\(document.pads[0].id)"}
+        """
+        suite.expect(ScratchpadDocument.decoded(Data(legacy.utf8), defaultName: "Notes")?.pads[0].calculationMode == false,
+                     "older Scratchpad documents default calculation mode off")
     }
 
     private static func titlesAndDuplicates(_ suite: TestSuite, now: Date) {

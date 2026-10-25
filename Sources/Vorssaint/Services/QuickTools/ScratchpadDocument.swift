@@ -22,18 +22,20 @@ struct ScratchpadPad: Codable, Equatable, Identifiable {
     var isTemporary = false
     var deletedAt: Date? = nil
     var usesAutomaticTitle = false
+    var calculationMode = false
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, text, modifiedAt, folderID, isPinned, isTemporary, deletedAt, usesAutomaticTitle
+        case id, name, text, modifiedAt, folderID, isPinned, isTemporary, deletedAt, usesAutomaticTitle, calculationMode
     }
 
     init(id: UUID, name: String, text: String, modifiedAt: Date?, folderID: UUID? = nil,
          isPinned: Bool = false, isTemporary: Bool = false, deletedAt: Date? = nil,
-         usesAutomaticTitle: Bool = false) {
+         usesAutomaticTitle: Bool = false, calculationMode: Bool = false) {
         self.id = id; self.name = name; self.text = text; self.modifiedAt = modifiedAt
         self.folderID = folderID; self.isPinned = isPinned
         self.isTemporary = isTemporary; self.deletedAt = deletedAt
         self.usesAutomaticTitle = usesAutomaticTitle
+        self.calculationMode = calculationMode
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +50,7 @@ struct ScratchpadPad: Codable, Equatable, Identifiable {
         deletedAt = try c.decodeIfPresent(Date.self, forKey: .deletedAt)
         // Names in existing documents and imports belong to the user.
         usesAutomaticTitle = try c.decodeIfPresent(Bool.self, forKey: .usesAutomaticTitle) ?? false
+        calculationMode = try c.decodeIfPresent(Bool.self, forKey: .calculationMode) ?? false
     }
 }
 
@@ -160,7 +163,8 @@ struct ScratchpadDocument: Codable, Equatable {
         let suffixLength = " \(pads.count + 2)".count
         let base = String(source.name.prefix(Self.maximumNameLength - suffixLength))
         let name = ScratchpadSupport.nextPadName(defaultName: base, existingNames: pads.map(\.name))
-        next.pads.append(.init(id: id, name: name, text: source.text, modifiedAt: now, folderID: source.folderID))
+        next.pads.append(.init(id: id, name: name, text: source.text, modifiedAt: now, folderID: source.folderID,
+                               calculationMode: source.calculationMode))
         next.openIDs.append(id)
         next.selectedID = id
         return next

@@ -335,6 +335,8 @@ struct ScratchpadWorkspace: View {
             Button(labels[.duplicate]) { service.duplicatePad(pad.id) }
             Button(pad.isPinned ? labels[.unpin] : labels[.pin]) { service.toggleNotePin(pad.id) }
             Toggle(labels[.temporary], isOn: Binding(get: { pad.isTemporary }, set: { _ in service.toggleTemporary(pad.id) }))
+            Toggle(labels[.calculationMode], isOn: Binding(get: { pad.calculationMode },
+                                                           set: { _ in service.toggleCalculationMode(pad.id) }))
             Menu(labels[.move]) {
                 Button(labels[.inbox]) { service.movePad(pad.id, to: nil) }
                 ForEach(service.folders) { folder in Button(folder.name) { service.movePad(pad.id, to: folder.id) } }
