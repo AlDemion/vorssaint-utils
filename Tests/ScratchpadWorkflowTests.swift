@@ -73,6 +73,30 @@ enum ScratchpadWorkflowTests {
             let labels = ScratchpadLibraryStrings(language: language)
             suite.expect(ScratchpadLibraryLabel.allCases.allSatisfy { !labels[$0].isEmpty }, "all Scratchpad labels exist for \(language)")
         }
+        calculation(suite)
+    }
+
+    private static func calculation(_ suite: TestSuite) {
+        let result = ScratchpadCalculationEvaluator.evaluate("""
+        rent = 900
+        rent * 3
+        prev + 100
+        sum
+        avg
+        quick note
+        """, decimalSeparator: ".", groupingSeparator: ",", locale: Locale(identifier: "en_US"))
+        suite.expect(result.lines.map(\.value) == [900, 2700, 2800, 6400, 3200, nil],
+                     "calculation mode evaluates lines in order and leaves prose untouched")
+        suite.expect(result.variables == ["rent": 900],
+                     "calculation mode retains named values without changing note text")
+
+        let comma = ScratchpadCalculationEvaluator.evaluate(
+            "amount = 1,5\namount * 2",
+            decimalSeparator: ",", groupingSeparator: ".", locale: Locale(identifier: "pt_BR"))
+        suite.expect(comma.lines.map(\.value) == [1.5, 3],
+                     "calculation mode resolves variables with comma-decimal locales")
+        suite.expect(ScratchpadCalculationEvaluator.evaluate("prev + 1").lines.allSatisfy { $0.value == nil },
+                     "history references stay plain text until a value exists")
     }
 
     private static func titlesAndDuplicates(_ suite: TestSuite, now: Date) {
