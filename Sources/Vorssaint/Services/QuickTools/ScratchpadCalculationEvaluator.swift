@@ -12,15 +12,27 @@ enum ScratchpadCalculationEvaluator {
     struct LineResult: Equatable {
         let source: String
         let value: Double?
+        let formatted: String?
         let variable: String?
     }
 
     struct Result: Equatable {
         let lines: [LineResult]
         let variables: [String: Double]
+
+        var copyText: String {
+            lines.map { line in
+                guard let formatted = line.formatted,
+                      formatted.caseInsensitiveCompare(
+                        line.source.trimmingCharacters(in: .whitespaces)) != .orderedSame
+                else { return line.source }
+                return "\(line.source)    \(formatted)"
+            }.joined(separator: "\n")
+        }
     }
 
     static func evaluate(_ source: String,
+                         currencyRates: ScratchpadCurrencyRates? = nil,
                          decimalSeparator: String = Locale.current.decimalSeparator ?? ".",
                          groupingSeparator: String = Locale.current.groupingSeparator ?? ",",
                          locale: Locale = .current) -> Result {
@@ -28,10 +40,10 @@ enum ScratchpadCalculationEvaluator {
         var previousValues: [Double] = []
         var results: [LineResult] = []
 
-        for line in source.components(separatedBy: .newlines) {
+        for line in lines(in: source) {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
-                results.append(LineResult(source: line, value: nil, variable: nil))
+                results.append(LineResult(source: line, value: nil, formatted: nil, variable: nil))
                 continue
             }
 
@@ -40,10 +52,12 @@ enum ScratchpadCalculationEvaluator {
             let expanded = substitute(expression, variables: variables,
                                        previousValues: previousValues,
                                        decimalSeparator: decimalSeparator)
-            let value = evaluateExpression(expanded,
-                                           decimalSeparator: decimalSeparator,
-                                           groupingSeparator: groupingSeparator,
-                                           locale: locale)
+            let evaluated = evaluateExpression(expanded,
+                                               currencyRates: currencyRates,
+                                               decimalSeparator: decimalSeparator,
+                                               groupingSeparator: groupingSeparator,
+                                               locale: locale)
+            let value = evaluated?.value
             let variable = assignment?.name.lowercased()
             if let value, value.isFinite {
                 if let variable {
@@ -51,28 +65,43 @@ enum ScratchpadCalculationEvaluator {
                 }
                 previousValues.append(value)
             }
-            results.append(LineResult(source: line, value: value, variable: variable))
+            results.append(LineResult(source: line, value: value, formatted: evaluated?.formatted, variable: variable))
         }
 
         return Result(lines: results, variables: variables)
     }
 
     private static func evaluateExpression(_ expression: String,
+                                           currencyRates: ScratchpadCurrencyRates?,
                                            decimalSeparator: String,
                                            groupingSeparator: String,
-                                           locale: Locale) -> Double? {
+                                           locale: Locale) -> (value: Double, formatted: String)? {
+        if let rates = currencyRates,
+           let converted = ScratchpadCurrency.convert(expression, rates: rates,
+                                                       decimalSeparator: decimalSeparator,
+                                                       groupingSeparator: groupingSeparator,
+                                                       locale: locale) {
+            return (converted.value, converted.formatted)
+        }
+        if let converted = CommandBarUnits.convert(expression,
+                                                   decimalSeparator: decimalSeparator,
+                                                   groupingSeparator: groupingSeparator,
+                                                   locale: locale) {
+            return (converted.value, converted.formatted)
+        }
         if let value = CommandBarMath.evaluate(expression,
                                                 decimalSeparator: decimalSeparator,
                                                 groupingSeparator: groupingSeparator,
-                                                locale: locale)?.value {
-            return value
+                                                locale: locale) {
+            return (value.value, value.formatted)
         }
         // CommandBarMath intentionally rejects lone numbers in launcher
         // queries. A calculation line may validly be a literal or variable.
-        return CommandBarMath.evaluate(expression + "+0",
-                                       decimalSeparator: decimalSeparator,
-                                       groupingSeparator: groupingSeparator,
-                                       locale: locale)?.value
+        guard let value = CommandBarMath.evaluate(expression + "+0",
+                                                  decimalSeparator: decimalSeparator,
+                                                  groupingSeparator: groupingSeparator,
+                                                  locale: locale) else { return nil }
+        return (value.value, value.formatted)
     }
 
     private struct Assignment {
@@ -129,6 +158,18 @@ enum ScratchpadCalculationEvaluator {
         let raw = String(value)
         let separator = decimalSeparator.isEmpty ? "." : decimalSeparator
         return raw.replacingOccurrences(of: ".", with: separator)
+    }
+
+    /// Splits on the line separators a note can contain, including the
+    /// Windows and classic Mac forms, so a pasted note evaluates the same
+    /// number of lines it displays. Callers keep their own source spelling.
+    static func lines(in source: String) -> [String] {
+        let normalized = source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\u{2028}", with: "\n")
+            .replacingOccurrences(of: "\u{2029}", with: "\n")
+        return normalized.components(separatedBy: "\n")
     }
 
     private static func isIdentifierStart(_ character: Character) -> Bool {

@@ -168,6 +168,7 @@ struct MetricsTests {
             ("scratchpad", {
                 ScratchpadMarkTests.run { suite.expect($0, $1) }
                 ScratchpadWorkflowTests.run(suite)
+                ScratchpadExchangeRateTests.run(suite)
             }),
             ("recording", {
                 RecorderPreparationTests.run(suite)

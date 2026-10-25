@@ -95,6 +95,28 @@ enum ScratchpadWorkflowTests {
             decimalSeparator: ",", groupingSeparator: ".", locale: Locale(identifier: "pt_BR"))
         suite.expect(comma.lines.map(\.value) == [1.5, 3],
                      "calculation mode resolves variables with comma-decimal locales")
+        let units = ScratchpadCalculationEvaluator.evaluate(
+            "100 km to mi\nplain note", decimalSeparator: ".", groupingSeparator: ",",
+            locale: Locale(identifier: "en_US"))
+        suite.expect(units.lines[0].value.map { abs($0 - 62.1371) < 0.001 } == true
+                     && units.lines[0].formatted?.isEmpty == false
+                     && units.lines[1].formatted == nil,
+                     "calculation mode reuses unit conversion and preserves plain lines")
+        suite.expect(units.copyText.contains("100 km to mi")
+                     && units.copyText.contains("    ")
+                     && units.copyText.hasSuffix("plain note"),
+                     "calculation copy includes answers while retaining plain source lines")
+        let rates = ScratchpadCurrencyRates(date: "2026-10-25", base: "USD",
+                                             rates: ["EUR": 0.9, "PLN": 4.0])
+        let money = ScratchpadCalculationEvaluator.evaluate(
+            "100 usd to eur\n20 eur to pln", currencyRates: rates,
+            decimalSeparator: ".", groupingSeparator: ",", locale: Locale(identifier: "en_US"))
+        let moneyValues = money.lines.compactMap(\.value)
+        suite.expect(moneyValues.count == 2
+                     && abs(moneyValues[0] - 90) < 0.01
+                     && abs(moneyValues[1] - 88.89) < 0.01
+                     && money.lines[1].formatted?.hasSuffix("PLN") == true,
+                     "calculation mode converts currencies using supplied rates")
         suite.expect(ScratchpadCalculationEvaluator.evaluate("prev + 1").lines.allSatisfy { $0.value == nil },
                      "history references stay plain text until a value exists")
 

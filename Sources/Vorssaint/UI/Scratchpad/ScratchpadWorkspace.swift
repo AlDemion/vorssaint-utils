@@ -13,7 +13,9 @@ struct ScratchpadWorkspace: View {
     let island: Bool
     @ObservedObject private var service = ScratchpadService.shared
     @ObservedObject private var l10n = L10n.shared
+    @ObservedObject private var exchangeRates = ScratchpadExchangeRateService.shared
     @AppStorage(DefaultsKey.scratchpadTextSize) private var storedTextSize = ScratchpadSupport.defaultTextSize
+    @AppStorage(DefaultsKey.scratchpadExchangeRatesEnabled) private var exchangeRatesEnabled = false
     @State private var editor = EditorHandle()
     @State private var editorSessions = ScratchpadEditor.Sessions()
     @State private var activeMarks = Set<ScratchpadMark>()
@@ -56,6 +58,13 @@ struct ScratchpadWorkspace: View {
         .onChange(of: service.selectedPadID) { _, _ in
             DispatchQueue.main.async { focusEditor() }
         }
+        .onChange(of: selectedPadUsesCalculation) { _, enabled in
+            if enabled { refreshExchangeRatesIfNeeded() }
+        }
+        .onChange(of: exchangeRatesEnabled) { _, enabled in
+            if enabled { refreshExchangeRatesIfNeeded() }
+        }
+        .onAppear { refreshExchangeRatesIfNeeded() }
         .onChange(of: service.pads.map(\.id)) { _, ids in
             editorSessions.retain(Set(ids))
         }
@@ -71,10 +80,7 @@ struct ScratchpadWorkspace: View {
             searchFocused = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .scratchpadFind)) { notification in
-            guard hostWindow?.isKeyWindow == true,
-                  let action = notification.userInfo?["action"] as? NSTextFinder.Action else { return }
-            if let view = editor.view { service.performFind(action, in: view) }
-            else { pendingFind = action; searchFocused = false; service.showsSidebar = false }
+            performFind(notification)
         }
         .task(id: copied) {
             guard copied else { return }
@@ -228,10 +234,15 @@ struct ScratchpadWorkspace: View {
     private var writingSurface: some View {
         VStack(spacing: 0) {
             if let pad = service.selectedPad {
+                let calculation = pad.calculationMode
+                    ? ScratchpadCalculationEvaluator.evaluate(pad.text, currencyRates: exchangeRates.rates)
+                    : nil
                 ZStack(alignment: .topLeading) {
                     ScratchpadEditor(text: service.binding(for: pad.id),
                         fontSize: CGFloat(ScratchpadSupport.sanitizedTextSize(storedTextSize)),
                         textColor: island ? .white : .labelColor, sourceMode: service.isSourceMode,
+                        calculationResults: calculation?.lines.map(\.formatted) ?? [],
+                        calculationColumnWidth: pad.calculationMode ? (island ? 96 : 110) : 0,
                         createsCheckboxOnNewLine: service.createsCheckboxOnNewLine,
                         position: service.editingPositions[pad.id],
                         session: editorSessions.session(for: pad.id),
@@ -349,6 +360,15 @@ struct ScratchpadWorkspace: View {
     private var actionsMenu: some View {
         Menu {
             if let pad = service.selectedPad { noteActions(pad); Divider() }
+            if selectedPadUsesCalculation {
+                Button(labels[.updateExchangeRates]) { exchangeRates.refreshIfNeeded(force: true) }
+                    .disabled(exchangeRates.isRefreshing)
+                Text(exchangeRates.isRefreshing ? labels[.updatingExchangeRates] : rateSummary)
+                if exchangeRates.failed {
+                    Text(labels[.exchangeRatesFailed])
+                }
+                Divider()
+            }
             Menu(labels[.checklistTools]) {
                 Toggle(labels[.createCheckboxOnNewLine], isOn: $service.createsCheckboxOnNewLine)
                 Divider()
@@ -383,6 +403,9 @@ struct ScratchpadWorkspace: View {
             Button { service.copyAll(); copied = true } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
                 .help(copied ? text.copied : text.copyAll).accessibilityLabel(text.copyAll).disabled(service.text.isEmpty)
             Spacer()
+            if selectedPadUsesCalculation, !island {
+                Text(rateSummary).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+            }
             Text(service.isSourceMode ? labels[.source] : labels[.liveEditing]).font(.system(size: 10)).foregroundStyle(.secondary)
             Button { service.clear(through: editor.view) } label: { Image(systemName: "eraser") }
                 .help(text.clearAction).accessibilityLabel(text.clearAction).disabled(service.text.isEmpty)
@@ -391,6 +414,38 @@ struct ScratchpadWorkspace: View {
     }
 
     private var hostWindow: NSWindow? { editor.view?.window ?? (island ? NotchService.shared.presentationWindow : service.presentationWindow) }
+
+    private var selectedPadUsesCalculation: Bool {
+        service.selectedPad?.calculationMode == true
+    }
+
+    private var rateSummary: String {
+        guard let date = exchangeRates.rates.localizedDate(locale: l10n.language.formattingLocale()) else {
+            return labels[.builtInRates]
+        }
+        return String(format: labels[.ratesUpdated], date)
+    }
+
+    /// Daily downloads wait for the opt-in toggle; opening a calculation note
+    /// is what asks for that day's table. The service itself refuses to fetch
+    /// again while a table is still fresh.
+    private func refreshExchangeRatesIfNeeded() {
+        guard exchangeRatesEnabled, selectedPadUsesCalculation else { return }
+        exchangeRates.refreshIfNeeded()
+    }
+
+    private func performFind(_ notification: Notification) {
+        guard hostWindow?.isKeyWindow == true,
+              let action = notification.userInfo?["action"] as? NSTextFinder.Action else { return }
+        if let view = editor.view {
+            service.performFind(action, in: view)
+        } else {
+            pendingFind = action
+            searchFocused = false
+            service.showsSidebar = false
+        }
+    }
+
     private func focusEditor() {
         guard !searchFocused, let view = editor.view, let window = view.window, window.isKeyWindow else { return }
         window.makeFirstResponder(view)

@@ -11,6 +11,8 @@ enum ScratchpadLibraryLabel: Int, CaseIterable {
     case duplicate, checklistTools, uncheckAll, removeCompleted, createCheckboxOnNewLine
     case previousNote, nextNote
     case calculationMode
+    case exchangeRatesToggle, exchangeRatesCaption, updateExchangeRates, updatingExchangeRates
+    case exchangeRatesFailed, builtInRates, ratesUpdated
 }
 
 struct ScratchpadLibraryStrings {
@@ -22,8 +24,153 @@ struct ScratchpadLibraryStrings {
             return label == .previousNote ? pair.0 : pair.1
         }
         if label == .calculationMode { return Self.calculation[language] ?? "Calculation mode" }
+        if let extra = Self.extras[language] {
+            switch label {
+            case .exchangeRatesToggle: return extra.toggle
+            case .exchangeRatesCaption: return extra.caption
+            case .updateExchangeRates: return extra.update
+            case .updatingExchangeRates: return extra.updating
+            case .exchangeRatesFailed: return extra.failed
+            case .builtInRates: return extra.builtIn
+            case .ratesUpdated: return extra.ratesFrom
+            default: break
+            }
+        }
         return Self.translations[language]![label.rawValue]
     }
+
+    private struct ExtraLabels {
+        let toggle: String
+        let caption: String
+        let update: String
+        let updating: String
+        let failed: String
+        let builtIn: String
+        let ratesFrom: String
+    }
+
+    private static let extras: [AppLanguage: ExtraLabels] = [
+        .enUS: ExtraLabels(
+            toggle: "Update exchange rates daily",
+            caption: "Currency answers work offline with built-in rates. With this on, Vorssaint downloads a small daily rate table from api.frankfurter.app. Note text is never sent.",
+            update: "Update rates now",
+            updating: "Updating rates…",
+            failed: "Could not update rates. Using the last saved table.",
+            builtIn: "Built-in rates",
+            ratesFrom: "Rates from %@"),
+        .ptBR: ExtraLabels(
+            toggle: "Atualizar taxas de câmbio diariamente",
+            caption: "As respostas em moeda funcionam offline com taxas integradas. Com esta opção ativada, o Vorssaint baixa uma pequena tabela diária de taxas de api.frankfurter.app. O texto da nota nunca é enviado.",
+            update: "Atualizar taxas agora",
+            updating: "Atualizando taxas…",
+            failed: "Não foi possível atualizar as taxas. Usando a última tabela salva.",
+            builtIn: "Taxas integradas",
+            ratesFrom: "Taxas de %@"),
+        .es: ExtraLabels(
+            toggle: "Actualizar los tipos de cambio a diario",
+            caption: "Las respuestas de moneda funcionan sin conexión con tipos integrados. Con esta opción activada, Vorssaint descarga una pequeña tabla diaria desde api.frankfurter.app. El texto de la nota nunca se envía.",
+            update: "Actualizar tipos ahora",
+            updating: "Actualizando tipos…",
+            failed: "No se pudieron actualizar los tipos. Se usa la última tabla guardada.",
+            builtIn: "Tipos integrados",
+            ratesFrom: "Tipos de %@"),
+        .fr: ExtraLabels(
+            toggle: "Mettre à jour les taux de change chaque jour",
+            caption: "Les réponses en devises fonctionnent hors ligne avec des taux intégrés. Lorsque cette option est activée, Vorssaint télécharge une petite table quotidienne depuis api.frankfurter.app. Le texte des notes n’est jamais envoyé.",
+            update: "Mettre à jour les taux",
+            updating: "Mise à jour des taux…",
+            failed: "Impossible de mettre à jour les taux. La dernière table enregistrée est utilisée.",
+            builtIn: "Taux intégrés",
+            ratesFrom: "Taux du %@"),
+        .de: ExtraLabels(
+            toggle: "Wechselkurse täglich aktualisieren",
+            caption: "Währungsantworten funktionieren offline mit integrierten Kursen. Wenn dies aktiviert ist, lädt Vorssaint eine kleine tägliche Kurstabelle von api.frankfurter.app. Notiztext wird nie gesendet.",
+            update: "Kurse jetzt aktualisieren",
+            updating: "Kurse werden aktualisiert…",
+            failed: "Kurse konnten nicht aktualisiert werden. Die zuletzt gespeicherte Tabelle wird verwendet.",
+            builtIn: "Integrierte Kurse",
+            ratesFrom: "Kurse vom %@"),
+        .it: ExtraLabels(
+            toggle: "Aggiorna i tassi di cambio ogni giorno",
+            caption: "Le risposte in valuta funzionano offline con tassi integrati. Con questa opzione attiva, Vorssaint scarica una piccola tabella giornaliera da api.frankfurter.app. Il testo delle note non viene mai inviato.",
+            update: "Aggiorna tassi ora",
+            updating: "Aggiornamento tassi…",
+            failed: "Impossibile aggiornare i tassi. Viene usata l’ultima tabella salvata.",
+            builtIn: "Tassi integrati",
+            ratesFrom: "Tassi del %@"),
+        .ja: ExtraLabels(
+            toggle: "為替レートを毎日更新",
+            caption: "通貨の計算は内蔵レートでオフラインでも動作します。これをオンにすると、Vorssaint は api.frankfurter.app から小さな毎日のレート表をダウンロードします。ノートの本文は送信されません。",
+            update: "今すぐレートを更新",
+            updating: "レートを更新中…",
+            failed: "レートを更新できませんでした。最後に保存した表を使用します。",
+            builtIn: "内蔵レート",
+            ratesFrom: "%@ のレート"),
+        .ko: ExtraLabels(
+            toggle: "환율을 매일 업데이트",
+            caption: "통화 계산은 내장 환율로 오프라인에서도 작동합니다. 이 옵션을 켜면 Vorssaint가 api.frankfurter.app에서 작은 일일 환율표를 내려받습니다. 노트 텍스트는 전송되지 않습니다.",
+            update: "지금 환율 업데이트",
+            updating: "환율 업데이트 중…",
+            failed: "환율을 업데이트하지 못했습니다. 마지막으로 저장된 표를 사용합니다.",
+            builtIn: "내장 환율",
+            ratesFrom: "%@ 기준 환율"),
+        .ru: ExtraLabels(
+            toggle: "Обновлять курсы валют ежедневно",
+            caption: "Расчёты в валютах работают офлайн со встроенными курсами. Если включить этот параметр, Vorssaint загружает небольшую ежедневную таблицу курсов с api.frankfurter.app. Текст заметок никогда не отправляется.",
+            update: "Обновить курсы сейчас",
+            updating: "Обновление курсов…",
+            failed: "Не удалось обновить курсы. Используется последняя сохранённая таблица.",
+            builtIn: "Встроенные курсы",
+            ratesFrom: "Курсы от %@"),
+        .uk: ExtraLabels(
+            toggle: "Оновлювати курси валют щодня",
+            caption: "Розрахунки у валютах працюють офлайн із вбудованими курсами. Якщо ввімкнути цей параметр, Vorssaint завантажує невелику щоденну таблицю курсів з api.frankfurter.app. Текст нотаток ніколи не надсилається.",
+            update: "Оновити курси зараз",
+            updating: "Оновлення курсів…",
+            failed: "Не вдалося оновити курси. Використовується остання збережена таблиця.",
+            builtIn: "Вбудовані курси",
+            ratesFrom: "Курси від %@"),
+        .sk: ExtraLabels(
+            toggle: "Denne aktualizovať výmenné kurzy",
+            caption: "Prepočty mien fungujú offline s vstavanými kurzami. Po zapnutí Vorssaint stiahne malú dennú tabuľku kurzov z api.frankfurter.app. Text poznámky sa nikdy neodosiela.",
+            update: "Aktualizovať kurzy teraz",
+            updating: "Aktualizácia kurzov…",
+            failed: "Kurzy sa nepodarilo aktualizovať. Použije sa naposledy uložená tabuľka.",
+            builtIn: "Vstavané kurzy",
+            ratesFrom: "Kurzy z %@"),
+        .tr: ExtraLabels(
+            toggle: "Döviz kurlarını her gün güncelle",
+            caption: "Döviz yanıtları yerleşik kurlarla çevrimdışı çalışır. Bu açıkken Vorssaint, api.frankfurter.app adresinden küçük bir günlük kur tablosu indirir. Not metni hiçbir zaman gönderilmez.",
+            update: "Kurları şimdi güncelle",
+            updating: "Kurlar güncelleniyor…",
+            failed: "Kurlar güncellenemedi. Son kaydedilen tablo kullanılıyor.",
+            builtIn: "Yerleşik kurlar",
+            ratesFrom: "Kurlar: %@"),
+        .zhHans: ExtraLabels(
+            toggle: "每天更新汇率",
+            caption: "货币换算使用内置汇率，可离线工作。开启后，Vorssaint 会从 api.frankfurter.app 下载一份小型每日汇率表。笔记正文绝不会被发送。",
+            update: "立即更新汇率",
+            updating: "正在更新汇率…",
+            failed: "无法更新汇率。将使用上次保存的汇率表。",
+            builtIn: "内置汇率",
+            ratesFrom: "汇率日期：%@"),
+        .zhTW: ExtraLabels(
+            toggle: "每天更新匯率",
+            caption: "貨幣換算使用內建匯率，可離線運作。開啟後，Vorssaint 會從 api.frankfurter.app 下載一份小型每日匯率表。筆記內容絕不會被傳送。",
+            update: "立即更新匯率",
+            updating: "正在更新匯率…",
+            failed: "無法更新匯率。將使用上次儲存的匯率表。",
+            builtIn: "內建匯率",
+            ratesFrom: "匯率日期：%@"),
+        .zhHK: ExtraLabels(
+            toggle: "每日更新匯率",
+            caption: "貨幣換算使用內置匯率，可離線運作。開啟後，Vorssaint 會從 api.frankfurter.app 下載一份小型每日匯率表。筆記內容絕不會被傳送。",
+            update: "立即更新匯率",
+            updating: "正在更新匯率…",
+            failed: "無法更新匯率。將使用上次儲存的匯率表。",
+            builtIn: "內置匯率",
+            ratesFrom: "匯率日期：%@"),
+    ]
 
     private static let calculation: [AppLanguage: String] = [
         .enUS: "Calculation mode", .ptBR: "Modo de cálculo", .es: "Modo de cálculo",

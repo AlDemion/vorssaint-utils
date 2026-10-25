@@ -9,6 +9,32 @@ struct ScratchpadEditorPosition {
     var scroll: NSPoint
 }
 
+/// Maps calculation answers to the display lines they belong to. Kept apart
+/// from the text view so the alignment rule can be checked without AppKit
+/// drawing a window.
+enum ScratchpadEditorLayout {
+    /// Start offset of each display line. A trailing newline adds its empty
+    /// last line so the count matches the evaluator; that line has no answer.
+    static func lineStartLocations(in string: String) -> [Int] {
+        let ns = string as NSString
+        guard ns.length > 0 else { return [0] }
+        var starts = [0]
+        var location = 0
+        while location < ns.length {
+            let line = ns.lineRange(for: NSRange(location: location, length: 0))
+            let next = NSMaxRange(line)
+            guard next > location else { break }
+            if next < ns.length { starts.append(next) }
+            location = next
+        }
+        if let last = ns.length > 0 ? ns.character(at: ns.length - 1) : nil,
+           last == 0x0A || last == 0x0D || last == 0x2028 || last == 0x2029 {
+            starts.append(ns.length)
+        }
+        return starts
+    }
+}
+
 /// A native text view keeps Markdown as its storage. Presentation attributes
 /// and hidden glyphs never enter the binding, pasteboard or undo history.
 struct ScratchpadEditor: NSViewRepresentable {
@@ -16,6 +42,8 @@ struct ScratchpadEditor: NSViewRepresentable {
     var fontSize: CGFloat = 13
     var textColor: NSColor = .labelColor
     var sourceMode = false
+    var calculationResults: [String?] = []
+    var calculationColumnWidth: CGFloat = 0
     var createsCheckboxOnNewLine = false
     var position: ScratchpadEditorPosition?
     var session: Session?
@@ -88,9 +116,12 @@ struct ScratchpadEditor: NSViewRepresentable {
         view.textContainerInset = NSSize(width: 10, height: 10)
         if view.string != text {
             view.string = text
+            view.invalidateLineStarts()
             view.undoManager?.removeAllActions()
         }
         view.sourceMode = sourceMode
+        view.calculationResults = calculationResults
+        view.calculationColumnWidth = calculationColumnWidth
         view.delegate = context.coordinator
         view.layoutManager?.delegate = context.coordinator
         context.coordinator.view = view
@@ -115,11 +146,14 @@ struct ScratchpadEditor: NSViewRepresentable {
         let modeChanged = view.sourceMode != sourceMode
         context.coordinator.parent = self
         view.sourceMode = sourceMode
+        view.calculationResults = calculationResults
+        view.calculationColumnWidth = calculationColumnWidth
         let changed = view.string != text
         if changed, !view.hasMarkedText() {
             context.coordinator.isUpdating = true
             let selection = view.selectedRange()
             view.string = text
+            view.invalidateLineStarts()
             let length = (text as NSString).length
             view.setSelectedRange(NSRange(location: min(selection.location, length),
                                          length: min(selection.length, max(0, length - selection.location))))
@@ -155,8 +189,87 @@ struct ScratchpadEditor: NSViewRepresentable {
         private let noteUndoManager = UndoManager()
         override var undoManager: UndoManager? { noteUndoManager }
         var sourceMode = false
+        var calculationColumnWidth: CGFloat = 0 {
+            didSet {
+                if calculationColumnWidth != oldValue { needsDisplay = true }
+            }
+        }
+        var calculationResults: [String?] = [] {
+            didSet {
+                if calculationResults != oldValue { needsDisplay = true }
+            }
+        }
+        private var cachedLineStarts: [Int]?
         var onLayout: (() -> Void)?
         override func layout() { super.layout(); onLayout?() }
+
+        override func didChangeText() {
+            super.didChangeText()
+            cachedLineStarts = nil
+        }
+
+        func invalidateLineStarts() {
+            cachedLineStarts = nil
+        }
+
+        /// Answers are painted in the margin the paragraph tail indent keeps
+        /// free. Drawing here rather than in a sibling view means the answers
+        /// scroll, wrap and follow the note without a second scroll position.
+        override func draw(_ dirtyRect: NSRect) {
+            super.draw(dirtyRect)
+            drawCalculationResults(in: dirtyRect)
+        }
+
+        private func drawCalculationResults(in dirtyRect: NSRect) {
+            guard calculationColumnWidth > 0, !calculationResults.isEmpty,
+                  let manager = layoutManager, textContainer != nil else { return }
+            let length = (string as NSString).length
+            guard length > 0 else { return }
+            let starts = cachedLineStarts ?? ScratchpadEditorLayout.lineStartLocations(in: string)
+            cachedLineStarts = starts
+            let pointSize = max(10, (font?.pointSize ?? 13) - 1)
+            let answerFont = NSFont.monospacedDigitSystemFont(ofSize: pointSize, weight: .regular)
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: answerFont,
+                .foregroundColor: Self.answerColor,
+            ]
+            let origin = textContainerOrigin
+            let rightEdge = bounds.width - textContainerInset.width - 2
+            let availableWidth = max(1, min(calculationColumnWidth - 4, rightEdge - origin.x))
+            for (index, answer) in calculationResults.enumerated() {
+                guard index < starts.count, starts[index] < length,
+                      let answer, !answer.isEmpty else { continue }
+                let character = starts[index]
+                let glyph = manager.glyphIndexForCharacter(at: character)
+                guard glyph < manager.numberOfGlyphs else { continue }
+                let line = manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+                let y = origin.y + line.minY
+                if y > dirtyRect.maxY { break }
+                guard y + line.height >= dirtyRect.minY else { continue }
+                var size = (answer as NSString).size(withAttributes: attributes)
+                var lineAttributes = attributes
+                if size.width > availableWidth {
+                    // Keep a long amount inside its margin instead of letting
+                    // it run under the note text.
+                    let fitted = max(7, pointSize * availableWidth / size.width)
+                    lineAttributes[.font] = NSFont.monospacedDigitSystemFont(ofSize: fitted,
+                                                                           weight: .regular)
+                    size = (answer as NSString).size(withAttributes: lineAttributes)
+                }
+                let x = max(origin.x, rightEdge - size.width)
+                let rect = NSRect(x: x, y: y + (line.height - size.height) / 2,
+                                  width: size.width, height: size.height)
+                (answer as NSString).draw(in: rect, withAttributes: lineAttributes)
+            }
+        }
+
+        /// A green that stays readable on the paper and dark island surfaces.
+        private static let answerColor = NSColor(name: nil) { appearance in
+            if appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua {
+                return .systemGreen
+            }
+            return NSColor(calibratedRed: 0.09, green: 0.48, blue: 0.24, alpha: 1)
+        }
 
         override func keyDown(with event: NSEvent) {
             let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
@@ -235,7 +348,7 @@ struct ScratchpadEditor: NSViewRepresentable {
             let textChanged = analyzedText != view.string
             if textChanged { analysis = ScratchpadMarkdown(view.string); analyzedText = view.string }
             let ns = view.string as NSString
-            let appearance = "\(parent.sourceMode):\(parent.fontSize):\(parent.textColor.description)"
+            let appearance = "\(parent.sourceMode):\(parent.fontSize):\(parent.textColor.description):\(parent.calculationColumnWidth)"
             if textChanged || renderedAppearance != appearance {
                 renderedAppearance = appearance
                 let undo = view.undoManager
@@ -246,6 +359,11 @@ struct ScratchpadEditor: NSViewRepresentable {
                 let font = NSFont.systemFont(ofSize: parent.fontSize)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.paragraphSpacing = 7
+                // Reserve the answer margin on every line, so the note wraps
+                // before the column and answers line up with their source.
+                if parent.calculationColumnWidth > 0 {
+                    paragraph.tailIndent = -parent.calculationColumnWidth
+                }
                 storage.setAttributes([.font: font, .foregroundColor: parent.textColor, .paragraphStyle: paragraph], range: full)
                 view.appearance = parent.textColor == .white ? NSAppearance(named: .darkAqua) : nil
                 view.insertionPointColor = parent.textColor

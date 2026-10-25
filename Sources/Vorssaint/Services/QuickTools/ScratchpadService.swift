@@ -419,7 +419,11 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.declareVorssaintSource()
-        pasteboard.setString(text, forType: .string)
+        let copied = selectedPad?.calculationMode == true
+            ? ScratchpadCalculationEvaluator.evaluate(
+                text, currencyRates: ScratchpadExchangeRateService.shared.rates).copyText
+            : text
+        pasteboard.setString(copied, forType: .string)
     }
 
     /// Clearing goes through the text view when it is up, so one Cmd+Z brings
