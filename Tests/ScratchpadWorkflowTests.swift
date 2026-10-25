@@ -77,6 +77,15 @@ enum ScratchpadWorkflowTests {
     }
 
     private static func calculation(_ suite: TestSuite) {
+        let regression = ScratchpadCalculationEvaluator.evaluate("x = -2\nx^2\n2026-07-27\n10:30\nx = nope\nx+1",
+            decimalSeparator: ".", groupingSeparator: ",", locale: Locale(identifier: "en_US"))
+        suite.expect(regression.lines.map(\.value) == [-2, 4, nil, nil, nil, nil],
+                     "variables preserve precedence, dates stay text, and invalid redefinitions cannot reuse stale values")
+        let scientific = ScratchpadCalculationEvaluator.evaluate("e = 3\n1e-8 + 1",
+            decimalSeparator: ".", groupingSeparator: ",", locale: Locale(identifier: "en_US"))
+        suite.expect(scientific.lines.last?.value == 1.00000001, "variable names do not replace scientific exponents")
+        let many = ScratchpadCalculationEvaluator.evaluate(Array(repeating: "1", count: 10_000).joined(separator: "\n") + "\nsum")
+        suite.expect(many.lines.last?.value == 10_000, "running aggregates handle a pasted numerical list")
         let result = ScratchpadCalculationEvaluator.evaluate("""
         rent = 900
         rent * 3
