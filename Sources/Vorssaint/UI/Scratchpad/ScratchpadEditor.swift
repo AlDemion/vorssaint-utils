@@ -181,6 +181,15 @@ struct ScratchpadEditor: NSViewRepresentable {
                     coordinator.apply(ScratchpadSupport.edit(applying: mark, to: string, selection: selectedRange()))
                     return
                 }
+                if modifiers == .option {
+                    let direction: PlainTextLineMover.Direction?
+                    switch event.specialKey {
+                    case .upArrow: direction = .up
+                    case .downArrow: direction = .down
+                    default: direction = nil
+                    }
+                    if let direction, coordinator.moveLine(direction, in: self) { return }
+                }
             }
             super.keyDown(with: event)
         }
@@ -329,6 +338,43 @@ struct ScratchpadEditor: NSViewRepresentable {
                   let edit = ScratchpadMarkdown.toggleTask(in: view.string, at: analysis.tasks[sender.tag].content.location) else { return }
             let selection = view.selectedRange()
             apply(.init(range: edit.range, replacement: edit.replacement, selection: selection))
+        }
+
+        /// Option-Up/Down swaps the caret's line (or every line a selection
+        /// touches) with its neighbour, keeping the selection on the moved
+        /// text. Only the exchanged span is replaced, so one undo restores it.
+        func moveLine(_ direction: PlainTextLineMover.Direction, in textView: NSTextView) -> Bool {
+            let before = textView.selectedRange()
+            guard let result = PlainTextLineMover.moving(direction, in: textView.string, selection: before)
+            else { return false }
+            let full = textView.string as NSString
+            let block = full.lineRange(for: before)
+            let span = direction == .up
+                ? NSUnionRange(full.lineRange(for: NSRange(location: block.location - 1, length: 0)), block)
+                : NSUnionRange(block, full.lineRange(for: NSRange(location: NSMaxRange(block), length: 0)))
+            let replacement = (result.text as NSString).substring(with: span)
+            if replacement != full.substring(with: span) {
+                guard textView.isEditable else { return false }
+                textView.breakUndoCoalescing()
+                Self.keepSelection(before, whenUndoing: true, in: textView)
+                guard textView.shouldChangeText(in: span, replacementString: replacement) else { return false }
+                textView.textStorage?.replaceCharacters(in: span, with: replacement)
+                textView.didChangeText()
+                Self.keepSelection(result.selection, whenUndoing: false, in: textView)
+            }
+            textView.setSelectedRange(result.selection)
+            textView.scrollRangeToVisible(result.selection)
+            return true
+        }
+
+        /// Selects `selection` when the step is undone (or redone), and
+        /// registers itself again each time so the pair survives any number
+        /// of round trips.
+        private static func keepSelection(_ selection: NSRange, whenUndoing: Bool, in textView: NSTextView) {
+            textView.undoManager?.registerUndo(withTarget: textView) { textView in
+                if textView.undoManager?.isUndoing == whenUndoing { textView.setSelectedRange(selection) }
+                keepSelection(selection, whenUndoing: whenUndoing, in: textView)
+            }
         }
 
         func apply(_ edit: ScratchpadMarkEdit) {
