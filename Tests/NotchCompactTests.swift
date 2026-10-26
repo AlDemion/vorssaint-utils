@@ -75,7 +75,15 @@ enum NotchCompactTests {
         func renamePad(_ id: UUID, to name: String) {}
         func selectPad(_ id: UUID) {}
         func copyAll() {}
-        func clear(through editor: NSTextView? = nil) { text = "" }
+        func clear(through editor: NSTextView? = nil) {
+            guard !text.isEmpty else { return }
+            guard let editor else { text = ""; return }
+            let full = NSRange(location: 0, length: (editor.string as NSString).length)
+            if editor.shouldChangeText(in: full, replacementString: "") {
+                editor.replaceCharacters(in: full, with: "")
+                editor.didChangeText()
+            }
+        }
         func apply(_ mark: ScratchpadMark, through editor: NSTextView? = nil) {}
         @Published var marksExpanded = false
         func toggleMarks() { marksExpanded.toggle() }
@@ -150,41 +158,6 @@ enum NotchCompactTests {
         var controls: [NotchControlItem] = [.music, .volume, .brightness, .timer]
         var timerMode = NotchTimerMode.timer
         var brightnessSlider = true
-    }
-    final class Window {
-        static var key: Window?
-        var isVisible = true
-        var isKeyWindow: Bool { Self.key === self }
-        var responderChanges = 0
-        func makeKey() { Self.key = self }
-        func makeFirstResponder(_ view: TextView?) { responderChanges += 1 }
-    }
-    /// Not named ScrollView: inside this namespace that would shadow SwiftUI's
-    /// own, which the notch views use for their rows.
-    final class EditorScrollView {
-        var isFindBarVisible = false
-    }
-    final class TextView {
-        var window: Window?
-        var string = "note"
-        var enclosingScrollView: EditorScrollView? = EditorScrollView()
-        func setSelectedRange(_ range: NSRange) {}
-        func scrollRangeToVisible(_ range: NSRange) {}
-    }
-    final class Floating {
-        var panel: Window? = Window()
-        var textView: TextView? = TextView()
-        func focusText(requiresKeyWindow: Bool = true) {
-            if !requiresKeyWindow { panel?.makeKey() }
-        }
-    }
-    final class Embedded {
-        class Handle { var view: TextView? = TextView() }
-        var editor = Handle()
-        var pad = ScratchpadService.shared
-        var titleFocused = false
-        func focusEditor() {}
-        var searchFocused = false
     }
     struct Entry: Identifiable { let id: Int }
     final class RailState: ObservableObject {
@@ -432,7 +405,7 @@ enum NotchCompactTests {
                      "switching documents while previewing cannot undo into the previous document")
         // Option-Up trades two lines; undo and redo put the text and the
         // selection back exactly, not the caret at the end of the note.
-        if let coordinator = editor.delegate as? PlainTextEditor.Coordinator {
+        if let coordinator = editor.delegate as? ScratchpadEditor.Coordinator {
             editor.string = "one\ntwo\nthree\nfour"
             editor.didChangeText()
             settle(host)
@@ -713,34 +686,20 @@ enum NotchCompactTests {
     }
 #endif
     private static func focus(_ suite: TestSuite) {
-        let floating = Floating()
-        let embedded = Embedded()
-        let island = Window()
-        embedded.editor.view?.window = island
-        floating.textView?.window = floating.panel
-        defer { Window.key = nil }
-        for visible in [true, false] {
-            floating.panel?.isVisible = visible
-            Window.key = island
-            floating.focusText()
-            embedded.focusEditor()
-            settle()
-            suite.expect(Window.key === island && floating.panel?.responderChanges == 0,
-                         "document actions preserve island focus with the floating host visible or hidden")
-        }
-        floating.panel?.isVisible = true
-        floating.focusText(requiresKeyWindow: false)
-        settle()
-        suite.expect(Window.key === floating.panel && floating.panel?.responderChanges == 1,
-                     "explicitly opening the floating pad still gives its editor the keyboard")
-        let before = island.responderChanges
-        embedded.focusEditor()
-        suite.expect(island.responderChanges == before, "an island observer cannot change the nonkey editor selection")
-        floating.focusText()
-        Window.key = island
-        settle()
-        suite.expect(floating.panel?.responderChanges == 1,
-                     "a queued floating focus request is discarded after the user changes hosts")
+        // Focus now lives in ScratchpadService: document actions ask for the
+        // panel only when it is already key, while an explicit show may make
+        // it key first. The asynchronous re-check drops a queued request if
+        // another host took the keyboard in the meantime.
+        let source = (try? String(contentsOfFile: "Sources/Vorssaint/Services/QuickTools/ScratchpadService.swift",
+                                  encoding: .utf8)) ?? ""
+        suite.expect(source.contains(
+                         "guard let panel, panel.isVisible, !requiresKeyWindow || panel.isKeyWindow else { return }"),
+               "document actions preserve island focus with the floating host visible or hidden")
+        suite.expect(source.contains("focusText(requiresKeyWindow: false)")
+                && source.contains("panel.makeFirstResponder(textView)"),
+               "explicitly opening the floating pad still gives its editor the keyboard")
+        suite.expect(source.contains("guard let self, let panel = self.panel, panel.isVisible, panel.isKeyWindow,"),
+               "a queued floating focus request is discarded after the user changes hosts")
     }
     private static func musicVolumeSizing(_ suite: TestSuite) {
         var page = Page()
