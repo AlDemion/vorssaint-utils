@@ -99,9 +99,13 @@ struct ScratchpadWorkspace: View {
                         Divider()
                         Button(labels[.newFolder]) { present(.newFolder) }
                     } label: {
-                        Label(collectionName, systemImage: collectionSymbol).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                        Label(collectionName, systemImage: collectionSymbol).lineLimit(1)
                     }
                     .menuStyle(.borderlessButton)
+                    // The menu keeps its own size so it cannot starve the fixed
+                    // controls beside it; the frame around it still fills the row.
+                    .frame(maxWidth: 180, alignment: .leading)
+                    .fixedSize()
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     adjacentButton(offset: -1, symbol: "chevron.left", label: .previousNote)
@@ -361,7 +365,9 @@ struct ScratchpadWorkspace: View {
             Button(labels[.restoreBackup]) { service.restoreBackup(from: hostWindow) }
             if island { Divider(); Button(text.openButton) { NotchService.shared.perform { service.show(allowsIsland: false) } } }
         } label: { Image(systemName: "ellipsis").frame(width: 22, height: 24) }
-        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
         .help(text.padActions).accessibilityLabel(text.padActions)
     }
 
