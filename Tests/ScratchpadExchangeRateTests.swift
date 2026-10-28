@@ -51,6 +51,20 @@ enum ScratchpadExchangeRateTests {
                      "currency conversions accept the same trailing equals as arithmetic")
         suite.expect(evaluate("2 km * 3 km\n10 / 0\n5 eur + 2 km\n(2 eur + 3 eur").lines.allSatisfy { $0.value == nil },
                      "unsupported derived dimensions, invalid syntax and division by zero never invent an answer")
+        suite.expect(evaluate("a = 10\nb = 20\nsum\navg\n\nc = 5\nsum").lines.map(\.value)
+                     == [10, 20, 30, 15, nil, 5, 5],
+                     "aggregate answers do not compound and blank lines start a new section")
+        suite.expect(evaluate("10\n20\ntotal\naverage\ntotal = 7\ntotal").lines.map(\.value)
+                     == [10, 20, 30, 15, 7, 7], "aggregate aliases respect explicit variables")
+        suite.expect(evaluate("per person: 90 / 3").lines[0].value == 30,
+                     "a label prefix leaves its expression calculable")
+        let percentages = evaluate("rent = 900 eur\n20% of rent\nrent + 10%\nrent - 20%\nrent + (5% + 5%)")
+        suite.expect(percentages.lines.map(\.value) == [900, 180, 990, 720, nil],
+                     "unit quantities retain relative percentage semantics without adding bare scalars")
+        suite.expect(abs((evaluate("5 ft 11 in to cm").lines[0].value ?? 0) - 180.34) < 0.0001,
+                     "compound feet and inches convert through the shared unit parser")
+        suite.expect(abs((evaluate("56/7 floz in ml").lines[0].value ?? 0) - 236.5882365) < 0.001,
+                     "a calculated source amount retains its unit before conversion")
         let negative = evaluate("x = -2\nx^2\na = -2 km\na * 3")
         suite.expect(negative.lines.map(\.value) == [-2, 4, -2, -6], "signed scalar and unit variables preserve precedence")
     }

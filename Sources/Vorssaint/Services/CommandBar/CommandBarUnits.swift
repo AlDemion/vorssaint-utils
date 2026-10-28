@@ -179,12 +179,20 @@ enum CommandBarUnits {
     private static func parseValue(_ tokens: [String],
                                    decimalSeparator: String,
                                    groupingSeparator: String) -> (value: Double, unit: KnownUnit)? {
-        guard tokens.count == 2,
+        guard tokens.count == 2 || tokens.count == 4,
               let unit = lexicon[tokens[1]],
               let value = number(tokens[0],
                                  decimalSeparator: decimalSeparator,
                                  groupingSeparator: groupingSeparator)
         else { return nil }
+        if tokens.count == 4 {
+            guard unit.unit.symbol == UnitLength.feet.symbol,
+                  let remainder = parseValue(Array(tokens.suffix(2)), decimalSeparator: decimalSeparator,
+                                             groupingSeparator: groupingSeparator),
+                  remainder.unit.unit.symbol == UnitLength.inches.symbol, remainder.value >= 0 else { return nil }
+            let feet = Measurement(value: remainder.value, unit: remainder.unit.unit).converted(to: unit.unit).value
+            return (value + (value < 0 ? -feet : feet), unit)
+        }
         return (value, unit)
     }
 

@@ -17,6 +17,7 @@ enum CommandBarMath {
         let value: Double
         /// Closing brackets supplied virtually while evaluating an unfinished expression.
         let closingBrackets: String
+        var percentRaw: Double? = nil
     }
 
     /// A complete numeric atom, without relaxing the launcher's expression guards.
@@ -49,7 +50,8 @@ enum CommandBarMath {
                                  groupingSeparator: groupingSeparator) else { return nil }
         let value = significantRounded(parsed.operand.value)
         guard value.isFinite, let formatted = format(value, locale: locale) else { return nil }
-        return Result(formatted: formatted, value: value, closingBrackets: parsed.closingBrackets)
+        return Result(formatted: formatted, value: value, closingBrackets: parsed.closingBrackets,
+                      percentRaw: parsed.operand.percentRaw)
     }
 
     /// Produces an ungrouped, locale-aware number suitable for putting an

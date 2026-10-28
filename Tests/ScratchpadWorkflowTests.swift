@@ -94,7 +94,7 @@ enum ScratchpadWorkflowTests {
         avg
         quick note
         """, decimalSeparator: ".", groupingSeparator: ",", locale: Locale(identifier: "en_US"))
-        suite.expect(result.lines.map(\.value) == [900, 2700, 2800, 6400, 3200, nil],
+        suite.expect(result.lines.map(\.value) == [900, 2700, 2800, 6400, 6400.0 / 3, nil],
                      "calculation mode evaluates lines in order and leaves prose untouched")
         suite.expect(result.variables == ["rent": 900],
                      "calculation mode retains named values without changing note text")

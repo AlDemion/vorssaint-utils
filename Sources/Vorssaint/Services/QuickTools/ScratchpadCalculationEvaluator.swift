@@ -38,7 +38,12 @@ enum ScratchpadCalculationEvaluator {
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             let match = assignment.firstMatch(in: trimmed, range: NSRange(location: 0, length: (trimmed as NSString).length))
             let name = match.map { (trimmed as NSString).substring(with: $0.range(at: 1)).lowercased() }
-            let expression = match.map { (trimmed as NSString).substring(with: $0.range(at: 2)) } ?? trimmed
+            let expressionSource = match.map { (trimmed as NSString).substring(with: $0.range(at: 2)) } ?? trimmed
+            let label = labelPrefix.firstMatch(in: expressionSource, range: NSRange(location: 0, length: (expressionSource as NSString).length))
+            let expression = label.map { (expressionSource as NSString).substring(with: $0.range(at: 1)) } ?? expressionSource
+            if trimmed.isEmpty { context.resetAggregate() }
+            let usesAggregate = expression.lowercased().split { !$0.isLetter && !$0.isNumber && $0 != "_" }
+                .contains { aggregateNames.contains(String($0)) && context.variables[String($0)] == nil }
             let quantity: Quantity?
             if let cached = constants[expression] { quantity = cached }
             else {
@@ -51,7 +56,7 @@ enum ScratchpadCalculationEvaluator {
             if let quantity {
                 formatted = rendered[quantity] ?? context.format(quantity)
                 if let formatted { rendered[quantity] = formatted }
-                context.record(quantity)
+                context.record(quantity, includeInAggregate: !usesAggregate)
             }
             if let name { context.variables[name] = quantity }
             results.append(LineResult(source: line, value: quantity?.value, formatted: formatted, variable: name))
@@ -60,11 +65,14 @@ enum ScratchpadCalculationEvaluator {
     }
 
     private static let assignment = try! NSRegularExpression(pattern: #"^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$"#)
+    private static let aggregateNames: Set<String> = ["sum", "total", "avg", "average"]
+    private static let labelPrefix = try! NSRegularExpression(pattern: #"^[\p{L}_][^:=]*:\s*(.+)$"#)
     private static let unitLiteral = try! NSRegularExpression(pattern: #"^(.+?)\s*([A-Za-z°]+|['"])$"#)
 
     private struct Quantity: Hashable {
         var value: Double
         var unit: String? = nil
+        var percentRaw: Double? = nil
     }
 
     private struct Context {
@@ -78,8 +86,15 @@ enum ScratchpadCalculationEvaluator {
         var count = 0
         var aggregateValid = true
 
-        mutating func record(_ value: Quantity) {
+        mutating func resetAggregate() {
+            total = nil
+            count = 0
+            aggregateValid = true
+        }
+
+        mutating func record(_ value: Quantity, includeInAggregate: Bool) {
             previous = value
+            guard includeInAggregate else { return }
             if count == 0 { total = value }
             else if aggregateValid, let existing = total { total = adding(existing, value) }
             aggregateValid = total != nil
@@ -90,8 +105,8 @@ enum ScratchpadCalculationEvaluator {
             if let value = variables[name] { return value }
             switch name {
             case "prev": return previous
-            case "sum": return aggregateValid ? total : nil
-            case "avg":
+            case "sum", "total": return aggregateValid ? total : nil
+            case "avg", "average":
                 guard aggregateValid, var value = total, count > 0 else { return nil }
                 value.value /= Double(count)
                 return value
@@ -144,9 +159,13 @@ enum ScratchpadCalculationEvaluator {
             if let literal = CommandBarMath.literalValue(expression, decimalSeparator: decimal, groupingSeparator: grouping) {
                 return Quantity(value: literal)
             }
+            if expression.hasSuffix("%"),
+               let value = CommandBarMath.literalValue(String(expression.dropLast()), decimalSeparator: decimal, groupingSeparator: grouping) {
+                return Quantity(value: value / 100, percentRaw: value)
+            }
             if let expanded = scalarExpression(expression),
                let result = CommandBarMath.evaluate(expanded, decimalSeparator: decimal, groupingSeparator: grouping, locale: locale) {
-                return Quantity(value: result.value)
+                return Quantity(value: result.value, percentRaw: result.percentRaw)
             }
 
             let tokens = CommandBarUnits.tokenize(expression)
@@ -160,7 +179,16 @@ enum ScratchpadCalculationEvaluator {
                let result = CommandBarUnits.convert(expression, decimalSeparator: decimal, groupingSeparator: grouping, locale: locale) {
                 return Quantity(value: result.value, unit: target)
             }
-            let characters = Array(expression.replacingOccurrences(of: "−", with: "-")
+            if let match = unitLiteral.firstMatch(in: expression, range: NSRange(location: 0, length: (expression as NSString).length)) {
+                let source = expression as NSString
+                let unit = source.substring(with: match.range(at: 2)).lowercased()
+                if knownUnit(unit), let value = evaluate(source.substring(with: match.range(at: 1)), depth: depth + 1),
+                      value.unit == nil {
+                    return Quantity(value: value.value, unit: unit)
+                }
+            }
+            let characters = Array(expression.replacingOccurrences(of: #"(?<=%)\s+of\s+"#, with: "*", options: [.regularExpression, .caseInsensitive])
+                .replacingOccurrences(of: "−", with: "-")
                 .replacingOccurrences(of: "×", with: "*").replacingOccurrences(of: "÷", with: "/")
                 .replacingOccurrences(of: "[", with: "(").replacingOccurrences(of: "]", with: ")"))
             for operators in ["+-", "*/", "^"] {
@@ -179,20 +207,14 @@ enum ScratchpadCalculationEvaluator {
             if characters.first == "(", characters.last == ")" {
                 return evaluate(String(characters.dropFirst().dropLast()), depth: depth + 1)
             }
-            if let match = unitLiteral.firstMatch(in: expression, range: NSRange(location: 0, length: (expression as NSString).length)) {
-                let source = expression as NSString
-                let unit = source.substring(with: match.range(at: 2)).lowercased()
-                guard knownUnit(unit), let value = evaluate(source.substring(with: match.range(at: 1)), depth: depth + 1),
-                      value.unit == nil else { return nil }
-                return Quantity(value: value.value, unit: unit)
-            }
             return nil
         }
 
         func applying(_ operation: Character, _ left: Quantity, _ right: Quantity) -> Quantity? {
             switch operation {
-            case "+": return adding(left, right)
-            case "-": return adding(left, Quantity(value: -right.value, unit: right.unit))
+            case "+", "-":
+                let delta = right.percentRaw.map { Quantity(value: left.value * $0 / 100, unit: left.unit) } ?? right
+                return adding(left, Quantity(value: operation == "-" ? -delta.value : delta.value, unit: delta.unit))
             case "*":
                 guard left.unit == nil || right.unit == nil else { return nil }
                 let value = left.value * right.value
