@@ -23,6 +23,7 @@ struct QuickToolsSettings: View {
     @AppStorage(DefaultsKey.scratchpadBackgroundOpacity) private var scratchpadBackgroundOpacity = 0.0
     @AppStorage(DefaultsKey.scratchpadTextSize) private var scratchpadTextSize = ScratchpadSupport.defaultTextSize
     @AppStorage(DefaultsKey.scratchpadExchangeRatesEnabled) private var scratchpadExchangeRatesEnabled = false
+    @AppStorage(DefaultsKey.scratchpadRateSources) private var scratchpadRateSources = ""
     @AppStorage(DefaultsKey.micMuteMenuBarIndicator) private var micMenuBarIndicator = false
     @AppStorage(DefaultsKey.cleaningModeKeepScreenVisible) private var cleaningModeKeepScreenVisible = false
 
@@ -257,6 +258,7 @@ struct QuickToolsSettings: View {
                         Text(scratchpadLabels[.exchangeRatesCaption])
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                        rateSourceList
                         HStack(spacing: 8) {
                             Text(exchangeRates.isRefreshing
                                  ? scratchpadLabels[.updatingExchangeRates]
@@ -320,6 +322,46 @@ struct QuickToolsSettings: View {
             get: { ScratchpadSupport.sanitizedBackgroundOpacity(scratchpadBackgroundOpacity) },
             set: { scratchpadBackgroundOpacity = ScratchpadSupport.sanitizedBackgroundOpacity($0) }
         )
+    }
+
+    /// The rate sources in the person's order, each with its own switch and
+    /// arrows. A later source is only asked for currencies the ones before it
+    /// did not return, so the order is a priority.
+    private var rateSourceList: some View {
+        let choices = ScratchpadRateSources.choices(from: scratchpadRateSources)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(scratchpadLabels[.rateSources])
+                .font(.caption.weight(.medium))
+            ForEach(Array(choices.enumerated()), id: \.element.provider) { index, choice in
+                HStack(spacing: 6) {
+                    Toggle(choice.provider.displayName, isOn: Binding(
+                        get: { choice.isEnabled },
+                        set: { setRateSources(ScratchpadRateSources.setting(choice.provider, enabled: $0, in: choices)) }))
+                        .toggleStyle(.checkbox)
+                    Spacer()
+                    Button { setRateSources(ScratchpadRateSources.moving(choice.provider, by: -1, in: choices)) } label: {
+                        Image(systemName: "chevron.up")
+                    }
+                    .disabled(index == 0)
+                    .help(scratchpadLabels[.moveSourceUp])
+                    .accessibilityLabel(scratchpadLabels[.moveSourceUp])
+                    Button { setRateSources(ScratchpadRateSources.moving(choice.provider, by: 1, in: choices)) } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .disabled(index == choices.count - 1)
+                    .help(scratchpadLabels[.moveSourceDown])
+                    .accessibilityLabel(scratchpadLabels[.moveSourceDown])
+                }
+                .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    private func setRateSources(_ choices: [ScratchpadRateSourceChoice]) {
+        let encoded = ScratchpadRateSources.encoded(choices)
+        guard encoded != ScratchpadRateSources.encoded(ScratchpadRateSources.choices(from: scratchpadRateSources)) else { return }
+        scratchpadRateSources = encoded
+        exchangeRates.sourcesDidChange()
     }
 
     private var scratchpadLabels: ScratchpadLibraryStrings {

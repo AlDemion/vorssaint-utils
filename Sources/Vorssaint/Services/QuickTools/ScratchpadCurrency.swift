@@ -11,19 +11,54 @@ struct ScratchpadCurrencyRates: Codable, Equatable, Sendable {
     let base: String
     let rates: [String: Double]
 
-    /// A cautious fallback so a calculation line still answers without a
-    /// network connection. These are rounded reference rates, deliberately
-    /// labelled as built-in rather than presented as today's market.
+    /// A fallback so a calculation line still answers without a network
+    /// connection: rates to 4 significant digits from 29 Oct 2026, covering
+    /// every supported currency. Deliberately labelled as built in rather
+    /// than presented as today's market, and never dated.
     static let bundled = ScratchpadCurrencyRates(
         date: "",
         base: "USD",
         rates: [
-            "AUD": 1.52, "BGN": 1.80, "BRL": 5.00, "CAD": 1.36, "CHF": 0.88,
-            "CNY": 7.24, "CZK": 23.2, "DKK": 6.90, "EUR": 0.92, "GBP": 0.79,
-            "HKD": 7.80, "HUF": 360, "IDR": 15_800, "ILS": 3.70, "INR": 83.5,
-            "ISK": 138, "JPY": 150, "KRW": 1_330, "MXN": 17.0, "MYR": 4.70,
-            "NOK": 10.7, "NZD": 1.65, "PHP": 56.5, "PLN": 4.00, "RON": 4.58,
-            "SEK": 10.5, "SGD": 1.35, "THB": 36.0, "TRY": 32.0, "ZAR": 18.5,
+            "AED": 3.672, "AFN": 65.04, "ALL": 81.46, "AMD": 359.7,
+            "ANG": 1.79, "AOA": 917.9, "ARS": 1538, "AUD": 1.422,
+            "AWG": 1.79, "AZN": 1.699, "BAM": 1.753, "BBD": 2.029,
+            "BDT": 124, "BHD": 0.376, "BIF": 3007, "BMD": 1,
+            "BND": 1.282, "BOB": 12.01, "BRL": 5.343, "BSD": 1.008,
+            "BTN": 95.17, "BWP": 13.54, "BYN": 2.958, "BZD": 2.026,
+            "CAD": 1.403, "CDF": 2293, "CHF": 0.829, "CLP": 984,
+            "CNY": 6.665, "COP": 3154, "CRC": 453.9, "CVE": 98.85,
+            "CZK": 21.86, "DJF": 177.6, "DKK": 6.708, "DOP": 61.28,
+            "DZD": 135.3, "EGP": 56.11, "ERN": 15.17, "ETB": 161.5,
+            "EUR": 0.8964, "FJD": 2.242, "FKP": 0.7511, "GBP": 0.7512,
+            "GEL": 2.592, "GHS": 11.61, "GIP": 0.7601, "GMD": 73.51,
+            "GNF": 8820, "GTQ": 7.643, "GYD": 211.7, "HKD": 7.851,
+            "HNL": 26.86, "HTG": 131, "HUF": 329.4, "IDR": 18_160,
+            "ILS": 3.093, "INR": 95.17, "IQD": 1514, "IRR": 1_858_000,
+            "ISK": 122.2, "JMD": 158.3, "JOD": 0.709, "JPY": 157.9,
+            "KES": 129.8, "KGS": 87.46, "KHR": 4082, "KMF": 442.3,
+            "KPW": 130, "KRW": 1334, "KWD": 0.3094, "KYD": 0.8372,
+            "KZT": 455.9, "LAK": 22_330, "LBP": 89_670, "LKR": 332,
+            "LRD": 170.2, "LSL": 16.64, "LYD": 6.431, "MAD": 9.855,
+            "MDL": 18.01, "MGA": 4578, "MKD": 55.33, "MMK": 2098,
+            "MNT": 3597, "MOP": 8.086, "MRU": 40.28, "MUR": 47.48,
+            "MVR": 15.44, "MWK": 1733, "MXN": 18.65, "MYR": 4.079,
+            "MZN": 63.72, "NAD": 16.64, "NGN": 1346, "NIO": 36.62,
+            "NOK": 9.306, "NPR": 152.4, "NZD": 1.772, "OMR": 0.3845,
+            "PAB": 1, "PEN": 3.449, "PGK": 4.485, "PHP": 63.97,
+            "PKR": 277.4, "PLN": 3.954, "PYG": 5843, "QAR": 3.64,
+            "RON": 4.803, "RSD": 105.6, "RUB": 80.56, "RWF": 1477,
+            "SAR": 3.75, "SBD": 8.009, "SCR": 14.45, "SDG": 600.1,
+            "SEK": 9.934, "SGD": 1.282, "SHP": 0.7511, "SLE": 22.86,
+            "SOS": 571.5, "SRD": 37.66, "SSP": 5760, "STN": 21.88,
+            "SVC": 8.752, "SYP": 122, "SZL": 16.63, "THB": 33.77,
+            "TJS": 9.207, "TMT": 3.5, "TND": 3.008, "TOP": 2.381,
+            "TRY": 49.82, "TTD": 6.753, "TWD": 32.46, "TZS": 2640,
+            "UAH": 45.57, "UGX": 4389, "UYU": 40.19, "UZS": 11_960,
+            "VES": 885.2, "VND": 25_800, "VUV": 118.9, "WST": 2.734,
+            "XAF": 588, "XAG": 0.01871, "XAU": 0.000248, "XCD": 2.739,
+            "XCG": 1.796, "XDR": 0.739, "XOF": 588, "XPD": 0.0009814,
+            "XPF": 107.2, "XPT": 0.0006573, "YER": 236.1, "ZAR": 16.62,
+            "ZMW": 20.22, "ZWG": 26.76,
         ])
 
     var isBundled: Bool {
@@ -69,13 +104,27 @@ struct ScratchpadCurrencyRates: Codable, Equatable, Sendable {
 }
 
 enum ScratchpadCurrency {
-    /// The currencies the rate provider supports. Kept as lowercase parser
-    /// vocabulary; the UI only ever shows the uppercased ISO code.
+    /// The ISO 4217 currencies a rate source can quote, as lowercase parser
+    /// vocabulary; the UI only ever shows the uppercased ISO code. CUP is left
+    /// out on purpose: "cup" is already a unit of volume. Sources also publish
+    /// crypto and non-ISO codes, which are ignored.
     static let supportedSymbols: Set<String> = [
-        "aud", "bgn", "brl", "cad", "chf", "cny", "czk", "dkk", "eur", "gbp",
-        "hkd", "huf", "idr", "ils", "inr", "isk", "jpy", "krw", "mxn", "myr",
-        "nok", "nzd", "php", "pln", "ron", "sek", "sgd", "thb", "try", "usd",
-        "zar",
+        "aed", "afn", "all", "amd", "ang", "aoa", "ars", "aud", "awg", "azn",
+        "bam", "bbd", "bdt", "bhd", "bif", "bmd", "bnd", "bob", "brl", "bsd",
+        "btn", "bwp", "byn", "bzd", "cad", "cdf", "chf", "clp", "cny", "cop",
+        "crc", "cve", "czk", "djf", "dkk", "dop", "dzd", "egp", "ern", "etb",
+        "eur", "fjd", "fkp", "gbp", "gel", "ghs", "gip", "gmd", "gnf", "gtq",
+        "gyd", "hkd", "hnl", "htg", "huf", "idr", "ils", "inr", "iqd", "irr",
+        "isk", "jmd", "jod", "jpy", "kes", "kgs", "khr", "kmf", "kpw", "krw",
+        "kwd", "kyd", "kzt", "lak", "lbp", "lkr", "lrd", "lsl", "lyd", "mad",
+        "mdl", "mga", "mkd", "mmk", "mnt", "mop", "mru", "mur", "mvr", "mwk",
+        "mxn", "myr", "mzn", "nad", "ngn", "nio", "nok", "npr", "nzd", "omr",
+        "pab", "pen", "pgk", "php", "pkr", "pln", "pyg", "qar", "ron", "rsd",
+        "rub", "rwf", "sar", "sbd", "scr", "sdg", "sek", "sgd", "shp", "sle",
+        "sos", "srd", "ssp", "stn", "svc", "syp", "szl", "thb", "tjs", "tmt",
+        "tnd", "top", "try", "ttd", "twd", "tzs", "uah", "ugx", "usd", "uyu",
+        "uzs", "ves", "vnd", "vuv", "wst", "xaf", "xag", "xau", "xcd", "xcg",
+        "xdr", "xof", "xpd", "xpf", "xpt", "yer", "zar", "zmw", "zwg",
     ]
 
     static func convert(_ input: String, rates: ScratchpadCurrencyRates,
@@ -105,7 +154,10 @@ enum ScratchpadCurrency {
 
     /// Currencies conventionally written without a fractional part, so a yen
     /// answer does not read as "1,234.00 JPY".
-    private static let zeroDecimalCurrencies: Set<String> = ["huf", "idr", "isk", "jpy", "krw"]
+    private static let zeroDecimalCurrencies: Set<String> = [
+        "bif", "clp", "djf", "gnf", "huf", "idr", "isk", "jpy", "kmf", "krw",
+        "pyg", "rwf", "ugx", "vnd", "vuv", "xaf", "xof", "xpf",
+    ]
 
     private static func number(_ input: String, decimalSeparator: String,
                                groupingSeparator: String) -> Double? {

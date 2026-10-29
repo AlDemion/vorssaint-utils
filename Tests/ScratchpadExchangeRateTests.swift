@@ -7,11 +7,23 @@ import Foundation
 enum ScratchpadExchangeRateTests {
     private static let now = Date(timeIntervalSince1970: 1_800_000_000)
     private static let payload = """
-    {"base":"USD","date":"2026-10-25","rates":{"EUR":0.9,"PLN":4.0,"JPY":150,"XYZ":2.0}}
+    [{"date":"2026-10-25","base":"USD","quote":"EUR","rate":0.9},
+     {"date":"2026-10-25","base":"USD","quote":"PLN","rate":4.0},
+     {"date":"2026-10-25","base":"USD","quote":"JPY","rate":150},
+     {"date":"2026-10-25","base":"USD","quote":"XYZ","rate":2.0}]
     """
+
+    /// A Frankfurter-shaped response that quotes every supported currency.
+    private static func fullPayload(date: String = "2026-10-25") -> String {
+        let rows = ScratchpadCurrency.supportedSymbols.subtracting(["usd"]).sorted().map {
+            #"{"date":"\#(date)","base":"USD","quote":"\#($0.uppercased())","rate":1.5}"#
+        }
+        return "[" + rows.joined(separator: ",") + "]"
+    }
 
     static func run(_ suite: TestSuite) {
         parser(suite)
+        rateSources(suite)
         cache(suite)
         redirects(suite)
         downloads(suite)
@@ -78,30 +90,99 @@ enum ScratchpadExchangeRateTests {
     }
 
     private static func parser(_ suite: TestSuite) {
-        let parsed = ScratchpadExchangeRateParser.snapshot(from: Data(payload.utf8), fetchedAt: now)
-        suite.expect(parsed?.rates.base == "USD" && parsed?.rates.date == "2026-10-25",
-                     "exchange rate parser keeps the provider base and rate date")
-        suite.expect(parsed?.rates.rates == ["EUR": 0.9, "PLN": 4.0, "JPY": 150],
-                     "exchange rate parser keeps supported currencies and drops the rest")
-        suite.expect(parsed?.fetchedAt == now,
-                     "exchange rate parser records the download time separately from the rate date")
+        let mixed = """
+        [{"date":"2026-10-25","base":"USD","quote":"EUR","rate":0.9},
+         {"date":"2026-10-25","base":"USD","quote":"UAH","rate":45.5},
+         {"date":"2026-10-24","base":"USD","quote":"JPY","rate":150},
+         {"date":"2026-10-25","base":"USD","quote":"BTC","rate":0.00001},
+         {"date":"2026-10-25","base":"USD","quote":"XYZ","rate":2.0},
+         {"date":"2026-10-10","base":"USD","quote":"AED","rate":3.6725},
+         {"date":"2026-10-25","base":"EUR","quote":"GBP","rate":0.88},
+         {"date":"2026-10-25","base":"USD","quote":"CHF","rate":null},
+         {"date":"2026-10-25","base":"USD","quote":"SEK","rate":0}]
+        """
+        let table = ScratchpadRateProvider.frankfurter.table(from: Data(mixed.utf8))
+        suite.expect(table?.rates == ["EUR": 0.9, "UAH": 45.5, "JPY": 150],
+                     "Frankfurter rows keep supported currencies against USD and drop crypto, unknown codes, other bases, null and zero rates")
+        suite.expect(table?.date == "2026-10-25",
+                     "a table is dated by its newest rate, and a rate more than a week older is left for another source")
 
-        let wrongBase = #"{"base":"EUR","date":"2026-10-25","rates":{"USD":1.1}}"#
-        suite.expect(ScratchpadExchangeRateParser.snapshot(from: Data(wrongBase.utf8), fetchedAt: now) == nil,
-                     "an unexpected base currency fails the response")
-        for date in ["2026-02-30", "2026-10-2", "yesterday"] {
-            let badDate = #"{"base":"USD","date":"\#(date)","rates":{"EUR":0.9}}"#
-            suite.expect(ScratchpadExchangeRateParser.snapshot(from: Data(badDate.utf8), fetchedAt: now) == nil,
-                         "an impossible rate date fails the response: \(date)")
-        }
-        let empty = #"{"base":"USD","date":"2026-10-25","rates":{"XYZ":2.0}}"#
-        suite.expect(ScratchpadExchangeRateParser.snapshot(from: Data(empty.utf8), fetchedAt: now) == nil,
-                     "a response with no supported currency is rejected")
-        let broken = #"{"base":"USD","date":"2026-10-25","rates":{"EUR":0}}"#
-        suite.expect(ScratchpadExchangeRateParser.snapshot(from: Data(broken.utf8), fetchedAt: now) == nil,
-                     "a zero rate is rejected")
-        suite.expect(ScratchpadExchangeRateParser.snapshot(from: Data("not json".utf8), fetchedAt: now) == nil,
-                     "malformed JSON is rejected")
+        let impossible = #"[{"date":"2026-02-30","base":"USD","quote":"EUR","rate":0.9},{"date":"yesterday","base":"USD","quote":"PLN","rate":4}]"#
+        suite.expect(ScratchpadRateProvider.frankfurter.table(from: Data(impossible.utf8)) == nil,
+                     "rows with an impossible rate date fail the response")
+        suite.expect(ScratchpadRateProvider.frankfurter.table(from: Data("[]".utf8)) == nil
+                     && ScratchpadRateProvider.frankfurter.table(from: Data("not json".utf8)) == nil,
+                     "an empty or malformed response is rejected")
+
+        let fawaz = #"{"date":"2026-10-25","usd":{"eur":0.91,"uah":45.6,"aed":3.67,"btc":0.00001,"chf":null,"sek":0}}"#
+        let fawazTable = ScratchpadRateProvider.fawazahmed0.table(from: Data(fawaz.utf8))
+        suite.expect(fawazTable?.rates == ["EUR": 0.91, "UAH": 45.6, "AED": 3.67] && fawazTable?.date == "2026-10-25",
+                     "the second source reads its own shape the same way")
+        suite.expect(ScratchpadRateProvider.fawazahmed0.table(from: Data(#"{"usd":{"eur":1}}"#.utf8)) == nil,
+                     "a response without a date is rejected")
+    }
+
+    private static func rateSources(_ suite: TestSuite) {
+        // Merging: each currency comes from the first source that has it.
+        let first = ScratchpadRateTable(date: "2026-10-25", rates: ["EUR": 0.9, "PLN": 4.0])
+        let second = ScratchpadRateTable(date: "2026-10-26", rates: ["EUR": 0.91, "UAH": 45.6])
+        let merged = ScratchpadRateMerge.merged([first, second])
+        suite.expect(merged?.rates == ["EUR": 0.9, "PLN": 4.0, "UAH": 45.6],
+                     "a currency comes from the highest-priority source that has it")
+        suite.expect(merged?.date == "2026-10-26",
+                     "the table date is the newest among the sources that contributed")
+        let redundant = ScratchpadRateMerge.merged([first, ScratchpadRateTable(date: "2026-10-30", rates: ["EUR": 1])])
+        suite.expect(redundant?.date == "2026-10-25",
+                     "a source that adds nothing does not change the date")
+        suite.expect(ScratchpadRateMerge.merged([]) == nil, "no tables, no merged table")
+        suite.expect(ScratchpadRateMerge.missing(from: [first]).contains("UAH")
+                     && !ScratchpadRateMerge.missing(from: [first]).contains("EUR")
+                     && !ScratchpadRateMerge.missing(from: [first]).contains("USD"),
+                     "missing currencies exclude the base and what a table already has")
+
+        // Supported currencies, collisions and the built-in table.
+        suite.expect(ScratchpadCurrency.supportedSymbols.allSatisfy { CommandBarUnits.family(of: $0) == nil },
+                     "no supported currency code is also a unit symbol")
+        suite.expect(ScratchpadCurrency.supportedSymbols.contains("uah") && ScratchpadCurrency.supportedSymbols.contains("aed")
+                     && !ScratchpadCurrency.supportedSymbols.contains("cup"),
+                     "the supported set is wide and leaves out the code that is also a unit")
+        let uncovered = ScratchpadCurrency.supportedSymbols.subtracting(["usd"])
+            .filter { ScratchpadCurrencyRates.bundled.rates[$0.uppercased()] == nil }
+        suite.expect(uncovered.isEmpty, "the built-in table covers every supported currency: \(uncovered.sorted())")
+        let english = Locale(identifier: "en_US")
+        suite.expect(ScratchpadCurrency.format(1234, in: "vnd", locale: english) == "1,234 VND"
+                     && ScratchpadCurrency.format(1234.5, in: "uah", locale: english) == "1,234.5 UAH",
+                     "zero-decimal currencies are written without cents")
+
+        // The person's order and on/off choice.
+        let defaults = ScratchpadRateSources.choices(from: nil)
+        suite.expect(defaults.map(\.provider) == [.ecb, .frankfurter, .fawazahmed0] && defaults.map(\.isEnabled) == [true, true, false],
+                     "out of the box the two same-host sources are on and the other host is off")
+        let custom = ScratchpadRateSources.choices(from: "fawazahmed0:1,frankfurter:1")
+        suite.expect(custom.map(\.provider) == [.fawazahmed0, .frankfurter, .ecb] && custom.first?.isEnabled == true,
+                     "a saved order is kept and a missing source joins the end")
+        suite.expect(ScratchpadRateSources.choices(from: "bogus:1,frankfurter:0,frankfurter:1").map(\.provider)
+                     == [.frankfurter, .ecb, .fawazahmed0],
+                     "unknown and repeated entries are dropped and a missing source is appended")
+        suite.expect(ScratchpadRateSources.choices(from: "ecb:0,frankfurter:0,fawazahmed0:0").first?.isEnabled == true,
+                     "a saved choice that turns every source off keeps the first on")
+        let onlyOne = ScratchpadRateSources.choices(from: "ecb:0,frankfurter:1,fawazahmed0:0")
+        suite.expect(ScratchpadRateSources.setting(.frankfurter, enabled: false, in: onlyOne) == onlyOne,
+                     "the last source on cannot be turned off")
+        let all = ScratchpadRateSources.setting(.fawazahmed0, enabled: true, in: defaults)
+        suite.expect(ScratchpadRateSources.enabledProviders(from: ScratchpadRateSources.encoded(all)) == [.ecb, .frankfurter, .fawazahmed0],
+                     "a choice survives being written and read back")
+        suite.expect(ScratchpadRateSources.moving(.fawazahmed0, by: -1, in: all).map(\.provider) == [.ecb, .fawazahmed0, .frankfurter]
+                     && ScratchpadRateSources.moving(.ecb, by: -1, in: all) == all
+                     && ScratchpadRateSources.moving(.fawazahmed0, by: 1, in: all) == all,
+                     "a source moves along the list and stops at either end")
+
+        // Evaluation with a wide table.
+        let rates = ScratchpadCurrencyRates(date: "2026-10-25", base: "USD", rates: ["UAH": 45.5, "AED": 3.6725, "EUR": 0.9])
+        let answer = ScratchpadCalculationEvaluator.evaluate("100 usd to uah\n10 aed + 5 eur",
+            currencyRates: rates, decimalSeparator: ".", groupingSeparator: ",", locale: english)
+        suite.expect(answer.lines[0].value == 4550 && answer.lines[1].value != nil,
+                     "currencies beyond the first thirty convert like any other")
     }
 
     private static func cache(_ suite: TestSuite) {
@@ -137,20 +218,26 @@ enum ScratchpadExchangeRateTests {
     }
 
     private static func redirects(_ suite: TestSuite) {
-        func allows(_ value: String) -> Bool {
-            guard let url = URL(string: value) else { return false }
-            return ScratchpadExchangeRateRedirect.allows(URLRequest(url: url))
+        func allows(_ value: String, from original: String) -> Bool {
+            guard let url = URL(string: value), let start = URL(string: original) else { return false }
+            return ScratchpadExchangeRateRedirect.allows(URLRequest(url: url), from: URLRequest(url: start))
         }
-        suite.expect(allows("https://api.frankfurter.dev/v1/latest"),
+        let origin = "https://api.frankfurter.dev/v2/rates"
+        suite.expect(allows("https://api.frankfurter.dev/v2/other", from: origin),
                      "the rate request may follow a same-host HTTPS redirect")
-        suite.expect(allows("https://API.FRANKFURTER.DEV/latest"),
+        suite.expect(allows("https://API.FRANKFURTER.DEV/latest", from: origin),
                      "the same host is accepted regardless of case")
-        suite.expect(!allows("https://rates.example/latest"),
+        suite.expect(!allows("https://rates.example/latest", from: origin),
                      "a redirect to another host is refused")
-        suite.expect(!allows("http://api.frankfurter.dev/latest"),
+        suite.expect(!allows("http://api.frankfurter.dev/latest", from: origin),
                      "a redirect away from HTTPS is refused")
-        suite.expect(!allows("https://api.frankfurter.dev.example/latest"),
+        suite.expect(!allows("https://api.frankfurter.dev.example/latest", from: origin),
                      "a host suffix cannot impersonate the provider")
+        suite.expect(allows("https://cdn.jsdelivr.net/other.json", from: "https://cdn.jsdelivr.net/npm/usd.json")
+                     && !allows("https://latest.currency-api.pages.dev/usd.json", from: "https://cdn.jsdelivr.net/npm/usd.json"),
+                     "each source's redirects are held to that source's own host")
+        suite.expect(!ScratchpadExchangeRateRedirect.allows(URLRequest(url: URL(string: origin)!), from: nil),
+                     "a redirect with no original request is refused")
     }
 
     private final class RateProtocol: URLProtocol, @unchecked Sendable {
@@ -221,17 +308,18 @@ enum ScratchpadExchangeRateTests {
                 requestSeen = request
                 complete(.success((Data(payload.utf8), Self.response(for: request, status: 200))))
             },
-            now: { now })
+            now: { now },
+            sources: { [.frankfurter] })
         refreshService.refreshIfNeeded(force: true)
         suite.expect(wait { refreshCalls == 1 && !refreshService.isRefreshing },
                      "a requested refresh asks the loader once")
         suite.expect(requestSeen?.url?.host == "api.frankfurter.dev"
-                     && requestSeen?.url?.path == "/v1/latest",
+                     && requestSeen?.url?.path == "/v2/rates",
                      "the refresh uses the documented provider endpoint")
         let query = requestSeen?.url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems } ?? []
-        let from = query.first { $0.name == "from" }?.value
-        let to = Set((query.first { $0.name == "to" }?.value ?? "").split(separator: ",").map(String.init))
-        suite.expect(from == "USD" && to.contains("EUR") && to.contains("PLN") && !to.contains("USD"),
+        let from = query.first { $0.name == "base" }?.value
+        let to = Set((query.first { $0.name == "quotes" }?.value ?? "").split(separator: ",").map(String.init))
+        suite.expect(from == "USD" && to.contains("EUR") && to.contains("UAH") && !to.contains("USD"),
                      "the refresh asks for every supported currency in one USD-based request")
         suite.expect(refreshService.rates.date == "2026-10-25"
                      && refreshService.rates.rates["EUR"] == 0.9
@@ -248,7 +336,8 @@ enum ScratchpadExchangeRateTests {
                 failureCalls += 1
                 complete(.failure(URLError(.notConnectedToInternet)))
             },
-            now: { now })
+            now: { now },
+            sources: { [.frankfurter] })
         let beforeFailure = failureService.rates
         failureService.refreshIfNeeded(force: true)
         suite.expect(wait { failureCalls == 1 && !failureService.isRefreshing },
@@ -269,12 +358,98 @@ enum ScratchpadExchangeRateTests {
                 statusCalls += 1
                 complete(.success((Data(payload.utf8), Self.response(for: request, status: 500))))
             },
-            now: { now })
+            now: { now },
+            sources: { [.frankfurter] })
         statusService.refreshIfNeeded(force: true)
         suite.expect(wait { statusCalls == 1 && !statusService.isRefreshing },
                      "an error response settles the loading state")
         suite.expect(statusService.failed && statusService.rates.isBundled,
                      "an error response leaves the bundled table in place")
+
+        chain(suite)
+    }
+
+    /// Sources are asked in order, and a later one only when it is needed.
+    private static func chain(_ suite: TestSuite) {
+        let fawaz = #"{"date":"2026-10-25","usd":{"eur":0.91,"uah":45.6}}"#
+        func run(sources: [ScratchpadRateProvider], bodies: [String: (Int, String)]) -> (ScratchpadExchangeRateService, [String]) {
+            var hosts: [String] = []
+            let service = ScratchpadExchangeRateService(
+                cacheURL: nil,
+                loader: { request, complete in
+                    let host = request.url?.host ?? ""
+                    hosts.append(host)
+                    let (status, body) = bodies[host + (request.url?.path ?? "")] ?? bodies[host] ?? (500, "")
+                    complete(.success((Data(body.utf8), Self.response(for: request, status: status))))
+                },
+                now: { now },
+                sources: { sources })
+            service.refreshIfNeeded(force: true)
+            _ = wait { !service.isRefreshing && !hosts.isEmpty }
+            return (service, hosts)
+        }
+
+        let complete = run(sources: [.frankfurter, .fawazahmed0],
+                           bodies: ["api.frankfurter.dev": (200, fullPayload()), "latest.currency-api.pages.dev": (200, fawaz)])
+        suite.expect(complete.1 == ["api.frankfurter.dev"] && !complete.0.failed,
+                     "a second source is not contacted when the first returned every currency")
+
+        let partial = run(sources: [.frankfurter, .fawazahmed0],
+                          bodies: ["api.frankfurter.dev": (200, payload), "latest.currency-api.pages.dev": (200, fawaz)])
+        suite.expect(partial.1 == ["api.frankfurter.dev", "latest.currency-api.pages.dev"],
+                     "a second source is asked when the first lacked currencies")
+        suite.expect(partial.0.rates.rates["EUR"] == 0.9 && partial.0.rates.rates["UAH"] == 45.6 && !partial.0.failed,
+                     "the missing currency comes from the next source while the first keeps its own")
+
+        let ecbFirst = run(sources: [.ecb, .frankfurter],
+                           bodies: ["api.frankfurter.dev/v2/providers/ecb/rates": (200, payload),
+                                    "api.frankfurter.dev/v2/rates": (200, fullPayload(date: "2026-10-26"))])
+        suite.expect(ecbFirst.1 == ["api.frankfurter.dev", "api.frankfurter.dev"]
+                     && ecbFirst.0.rates.rates["EUR"] == 0.9 && ecbFirst.0.rates.rates["UAH"] == 1.5,
+                     "the ECB's figures win for its currencies and the blended table fills the rest")
+        suite.expect(ecbFirst.0.rates.date == "2026-10-26" && !ecbFirst.0.failed,
+                     "the date shown is the newest of the tables that contributed")
+        let request = ScratchpadRateProvider.ecb.requests.first?.url
+        suite.expect(request?.path == "/v2/providers/ecb/rates" && request?.host == "api.frankfurter.dev",
+                     "the ECB source asks Frankfurter's provider endpoint")
+
+        let fallback = run(sources: [.frankfurter, .fawazahmed0],
+                           bodies: ["api.frankfurter.dev": (500, ""), "latest.currency-api.pages.dev": (200, fawaz)])
+        suite.expect(fallback.0.rates.rates["UAH"] == 45.6 && fallback.0.rates.date == "2026-10-25" && !fallback.0.failed,
+                     "a failing first source falls through to the next")
+
+        let mirror = run(sources: [.fawazahmed0],
+                         bodies: ["latest.currency-api.pages.dev": (503, ""), "cdn.jsdelivr.net": (200, fawaz)])
+        suite.expect(mirror.1 == ["latest.currency-api.pages.dev", "cdn.jsdelivr.net"] && mirror.0.rates.rates["UAH"] == 45.6,
+                     "a source's mirror is tried when its first host fails")
+
+        let single = run(sources: [.frankfurter], bodies: ["api.frankfurter.dev": (200, payload), "latest.currency-api.pages.dev": (200, fawaz)])
+        suite.expect(single.1 == ["api.frankfurter.dev"] && single.0.rates.rates["UAH"] == nil,
+                     "a source that is switched off is never contacted")
+
+        let dead = run(sources: [.frankfurter, .fawazahmed0], bodies: [:])
+        suite.expect(dead.0.failed && dead.0.rates.isBundled,
+                     "every source failing reports the failure and keeps the built-in table")
+
+        // Changing the sources makes the saved table stale.
+        var calls = 0
+        let changing = ScratchpadExchangeRateService(
+            cacheURL: nil,
+            loader: { request, complete in
+                calls += 1
+                complete(.success((Data(fullPayload().utf8), Self.response(for: request, status: 200))))
+            },
+            now: { now },
+            sources: { [.frankfurter] })
+        changing.refreshIfNeeded(force: true)
+        _ = wait { calls == 1 && !changing.isRefreshing }
+        suite.expect(changing.hasCurrentRates, "a downloaded table is current")
+        changing.refreshIfNeeded()
+        suite.expect(calls == 1, "a current table is not downloaded again")
+        changing.sourcesDidChange()
+        suite.expect(!changing.hasCurrentRates, "changing the sources makes the saved table stale")
+        changing.refreshIfNeeded()
+        suite.expect(wait { calls == 2 && !changing.isRefreshing }, "the next refresh after a change asks again")
     }
 
     private static func currency(_ suite: TestSuite) {
@@ -372,7 +547,7 @@ enum ScratchpadExchangeRateTests {
     }
 
     private static func response(for request: URLRequest, status: Int) -> HTTPURLResponse {
-        HTTPURLResponse(url: request.url ?? URL(string: "https://api.frankfurter.dev/v1/latest")!,
+        HTTPURLResponse(url: request.url ?? URL(string: "https://api.frankfurter.dev/v2/rates")!,
                         statusCode: status, httpVersion: nil, headerFields: nil)!
     }
 

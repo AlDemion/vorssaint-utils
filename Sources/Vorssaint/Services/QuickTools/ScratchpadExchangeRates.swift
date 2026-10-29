@@ -19,32 +19,8 @@ struct ScratchpadExchangeRateSnapshot: Codable, Equatable {
     }
 }
 
-/// Frankfurter's public response, limited to the fields calculation mode uses.
-struct ScratchpadExchangeRatePayload: Decodable {
-    let base: String
-    let date: String
-    let rates: [String: Double]
-}
-
 enum ScratchpadExchangeRateParser {
     static let expectedBase = "USD"
-
-    static func snapshot(from data: Data, fetchedAt: Date) -> ScratchpadExchangeRateSnapshot? {
-        guard let payload = try? JSONDecoder().decode(ScratchpadExchangeRatePayload.self, from: data),
-              payload.base.uppercased() == expectedBase,
-              validDate(payload.date) else { return nil }
-        let supported = ScratchpadCurrency.supportedSymbols
-        var checked: [String: Double] = [:]
-        for (rawSymbol, rate) in payload.rates {
-            let symbol = rawSymbol.uppercased()
-            guard supported.contains(symbol.lowercased()), rate.isFinite, rate > 0 else { continue }
-            checked[symbol] = rate
-        }
-        guard !checked.isEmpty else { return nil }
-        return ScratchpadExchangeRateSnapshot(
-            rates: ScratchpadCurrencyRates(date: payload.date, base: expectedBase, rates: checked),
-            fetchedAt: fetchedAt)
-    }
 
     /// The provider writes ISO calendar dates. A malformed or impossible date
     /// fails the whole response rather than reaching the result column.
@@ -86,13 +62,11 @@ enum ScratchpadExchangeRateCache {
 }
 
 enum ScratchpadExchangeRateRedirect {
-    static let host = "api.frankfurter.dev"
-
-    /// The rate request may only hop within its own HTTPS host. A redirect to
-    /// another address is treated as a failed download, never followed.
-    static func allows(_ request: URLRequest) -> Bool {
-        guard let url = request.url,
-              url.scheme?.lowercased() == "https" else { return false }
+    /// A request may only hop within the HTTPS host it started on. A redirect
+    /// to another address is treated as a failed download, never followed.
+    static func allows(_ request: URLRequest, from original: URLRequest?) -> Bool {
+        guard let url = request.url, url.scheme?.lowercased() == "https",
+              let host = original?.url?.host?.lowercased() else { return false }
         return url.host?.lowercased() == host
     }
 }
@@ -174,7 +148,7 @@ enum ScratchpadExchangeRateHTTP {
                         willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest,
                         completionHandler: @escaping (URLRequest?) -> Void) {
-            completionHandler(ScratchpadExchangeRateRedirect.allows(request) ? request : nil)
+            completionHandler(ScratchpadExchangeRateRedirect.allows(request, from: task.originalRequest) ? request : nil)
         }
     }
 }
@@ -183,6 +157,8 @@ enum ScratchpadExchangeRateHTTP {
 /// no note ever needs the network to answer. A download happens only after the
 /// person turns daily updates on or asks for one, at most once a day
 /// automatically, and a failed download leaves the previous table in place.
+/// Sources are asked in the person's order, and a later one only when the ones
+/// before it did not return every currency.
 final class ScratchpadExchangeRateService: ObservableObject {
     static let shared = ScratchpadExchangeRateService()
 
@@ -195,8 +171,10 @@ final class ScratchpadExchangeRateService: ObservableObject {
     private let cacheURL: URL?
     private let loader: Loader
     private let now: () -> Date
+    private let sources: () -> [ScratchpadRateProvider]
     private var snapshot: ScratchpadExchangeRateSnapshot
     private var lastAttempt: Date?
+    private var sourcesChanged = false
 
     /// A failed automatic attempt waits before trying again, so opening notes
     /// while offline does not become a stream of requests. The explicit
@@ -205,10 +183,15 @@ final class ScratchpadExchangeRateService: ObservableObject {
 
     init(cacheURL: URL? = ScratchpadExchangeRateCache.defaultURL,
          loader: @escaping Loader = ScratchpadExchangeRateHTTP.load,
-         now: @escaping () -> Date = Date.init) {
+         now: @escaping () -> Date = Date.init,
+         sources: @escaping () -> [ScratchpadRateProvider] = {
+             ScratchpadRateSources.enabledProviders(
+                 from: UserDefaults.standard.string(forKey: DefaultsKey.scratchpadRateSources))
+         }) {
         self.cacheURL = cacheURL
         self.loader = loader
         self.now = now
+        self.sources = sources
         let cached = cacheURL.flatMap(ScratchpadExchangeRateCache.load(from:))
         let starting = cached ?? ScratchpadExchangeRateSnapshot(
             rates: .bundled, fetchedAt: .distantPast)
@@ -217,7 +200,7 @@ final class ScratchpadExchangeRateService: ObservableObject {
     }
 
     var hasCurrentRates: Bool {
-        snapshot.isFresh(now: now())
+        !sourcesChanged && snapshot.isFresh(now: now())
     }
 
     private var retryIsDue: Bool {
@@ -225,51 +208,66 @@ final class ScratchpadExchangeRateService: ObservableObject {
         return abs(now().timeIntervalSince(lastAttempt)) >= Self.automaticRetryInterval
     }
 
-    static var request: URLRequest {
-        var components = URLComponents(string: "https://\(ScratchpadExchangeRateRedirect.host)/v1/latest")!
-        let symbols = ScratchpadCurrency.supportedSymbols
-            .subtracting([ScratchpadExchangeRateParser.expectedBase.lowercased()])
-            .map { $0.uppercased() }
-            .sorted()
-            .joined(separator: ",")
-        components.queryItems = [
-            URLQueryItem(name: "from", value: ScratchpadExchangeRateParser.expectedBase),
-            URLQueryItem(name: "to", value: symbols),
-        ]
-        var request = URLRequest(url: components.url!)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 15
-        return request
+    /// The person reordered or switched a source: the saved table no longer
+    /// reflects their choice, so the next automatic refresh asks again.
+    func sourcesDidChange() {
+        sourcesChanged = true
+        lastAttempt = nil
     }
 
     /// A daily refresh for the automatic path; `force` backs the explicit
-    /// Update rates now action. The loader runs off the main thread and its
-    /// result is applied on the main thread before any view reads it.
+    /// Update rates now action. Loaders run off the main thread and each result
+    /// is applied on the main thread before any view reads it.
     func refreshIfNeeded(force: Bool = false) {
         guard !isRefreshing else { return }
-        guard force || (retryIsDue && !snapshot.isFresh(now: now())) else { return }
+        guard force || (retryIsDue && !hasCurrentRates) else { return }
+        let providers = sources()
+        guard !providers.isEmpty else { return }
         lastAttempt = now()
         isRefreshing = true
         failed = false
-        loader(Self.request) { [weak self] result in
+        collect(providers[...], tables: []) { [weak self] tables in
+            guard let self else { return }
+            self.isRefreshing = false
+            guard let merged = ScratchpadRateMerge.merged(tables) else {
+                self.failed = true
+                return
+            }
+            let next = ScratchpadExchangeRateSnapshot(rates: merged, fetchedAt: self.now())
+            self.snapshot = next
+            self.rates = next.rates
+            self.sourcesChanged = false
+            if let cacheURL = self.cacheURL {
+                _ = ScratchpadExchangeRateCache.save(next, to: cacheURL)
+            }
+        }
+    }
+
+    /// Asks the sources in order until every supported currency has a rate or
+    /// none is left. A source that fails is skipped, not fatal.
+    private func collect(_ providers: ArraySlice<ScratchpadRateProvider>, tables: [ScratchpadRateTable],
+                         completion: @escaping ([ScratchpadRateTable]) -> Void) {
+        guard let provider = providers.first else { completion(tables); return }
+        fetch(provider, requests: provider.requests[...]) { [weak self] table in
+            guard let self else { return }
+            let next = table.map { tables + [$0] } ?? tables
+            if ScratchpadRateMerge.missing(from: next).isEmpty { completion(next); return }
+            self.collect(providers.dropFirst(), tables: next, completion: completion)
+        }
+    }
+
+    /// Tries a source's endpoints in turn; each one after the first is a mirror.
+    private func fetch(_ provider: ScratchpadRateProvider, requests: ArraySlice<URLRequest>,
+                       completion: @escaping (ScratchpadRateTable?) -> Void) {
+        guard let request = requests.first else { completion(nil); return }
+        loader(request) { [weak self] result in
             DispatchQueue.main.async {
                 guard let self else { return }
-                self.isRefreshing = false
-                switch result {
-                case .success(let (data, response)):
-                    guard response.statusCode == 200,
-                          let next = ScratchpadExchangeRateParser.snapshot(from: data, fetchedAt: self.now())
-                    else {
-                        self.failed = true
-                        return
-                    }
-                    self.snapshot = next
-                    self.rates = next.rates
-                    if let cacheURL = self.cacheURL {
-                        _ = ScratchpadExchangeRateCache.save(next, to: cacheURL)
-                    }
-                case .failure:
-                    self.failed = true
+                if case .success(let (data, response)) = result, response.statusCode == 200,
+                   let table = provider.table(from: data) {
+                    completion(table)
+                } else {
+                    self.fetch(provider, requests: requests.dropFirst(), completion: completion)
                 }
             }
         }
