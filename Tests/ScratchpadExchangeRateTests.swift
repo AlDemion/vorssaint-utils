@@ -24,6 +24,8 @@ enum ScratchpadExchangeRateTests {
     static func run(_ suite: TestSuite) {
         parser(suite)
         rateSources(suite)
+        calculationSyntax(suite)
+        primeNotation(suite)
         cache(suite)
         redirects(suite)
         downloads(suite)
@@ -183,6 +185,42 @@ enum ScratchpadExchangeRateTests {
             currencyRates: rates, decimalSeparator: ".", groupingSeparator: ",", locale: english)
         suite.expect(answer.lines[0].value == 4550 && answer.lines[1].value != nil,
                      "currencies beyond the first thirty convert like any other")
+    }
+
+    private static func calculationSyntax(_ suite: TestSuite) {
+        let source = "rent = 900 eur\nper person: 90 / 3\n5 ft 11 in to cm\n20% of rent\nBook the train to Lisbon in May\nx in mi\n10:30"
+        let answered: Set<Int> = [0, 1, 2, 3, 5]
+        let spans = ScratchpadCalculationSyntax.spans(in: source) { answered.contains($0) }
+        func words(_ role: ScratchpadCalculationSyntax.Role) -> [String] {
+            spans.filter { $0.role == role }.map { (source as NSString).substring(with: $0.range) }
+        }
+        suite.expect(words(.variable) == ["rent"], "the name on the left of an assignment is picked out")
+        suite.expect(words(.label) == ["per person:"], "a label before a calculation is picked out with its colon")
+        suite.expect(words(.keyword) == ["to", "of", "in"],
+                     "connecting words are picked out, and the inches in '5 ft 11 in to cm' are not mistaken for one")
+        suite.expect(ScratchpadCalculationSyntax.spans(in: source) { _ in false }.isEmpty,
+                     "lines without an answer, such as prose containing 'to' and 'in', are left alone")
+        let windows = "a = 1\r\nb = 2"
+        suite.expect(ScratchpadCalculationSyntax.spans(in: windows) { _ in true }.map(\.range)
+                     == [NSRange(location: 0, length: 1), NSRange(location: 7, length: 1)],
+                     "ranges follow the text across Windows line endings")
+        suite.expect(ScratchpadCalculationSyntax.spans(in: "", answered: { _ in true }).isEmpty,
+                     "an empty note has nothing to colour")
+    }
+
+    private static func primeNotation(_ suite: TestSuite) {
+        let english = Locale(identifier: "en_US")
+        func inches(_ input: String) -> Double? {
+            CommandBarUnits.convert(input, decimalSeparator: ".", groupingSeparator: ",", locale: english)?.value
+        }
+        for input in ["5' 11\" in cm", "5'11\" in cm", "5 ft 11 in to cm", "5ft11in to cm", "5\u{2032} 11\u{2033} in cm"] {
+            suite.expectClose(inches(input) ?? .nan, 180.34, "feet and inches convert: \(input)", tol: 0.001)
+        }
+        suite.expectClose(inches("5' in cm") ?? .nan, 152.4, "a bare foot mark means feet", tol: 0.001)
+        suite.expectClose(inches("10\" in cm") ?? .nan, 25.4, "a bare inch mark means inches", tol: 0.001)
+        suite.expect(inches("5\" 11' in cm") == nil, "inches before feet are not a height")
+        let line = ScratchpadCalculationEvaluator.evaluate("5' 11\" in cm", decimalSeparator: ".", groupingSeparator: ",", locale: english)
+        suite.expectClose(line.lines[0].value ?? .nan, 180.34, "a note line reads feet and inches written with marks", tol: 0.001)
     }
 
     private static func cache(_ suite: TestSuite) {

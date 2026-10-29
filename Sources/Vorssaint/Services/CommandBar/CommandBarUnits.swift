@@ -61,8 +61,8 @@ enum CommandBarUnits {
         add(["m", "meter", "meters", "metro", "metros", "metre", "metres"], .length, UnitLength.meters)
         add(["km", "kilometer", "kilometers", "kilometre", "kilometres", "quilometro", "quilometros"],
             .length, UnitLength.kilometers)
-        add(["in", "inch", "inches", "polegada", "polegadas", "\""], .length, UnitLength.inches)
-        add(["ft", "foot", "feet", "pe", "pes"], .length, UnitLength.feet)
+        add(["in", "inch", "inches", "polegada", "polegadas", "\"", "\u{2033}"], .length, UnitLength.inches)
+        add(["ft", "foot", "feet", "pe", "pes", "'", "\u{2032}"], .length, UnitLength.feet)
         add(["yd", "yard", "yards", "jarda", "jardas"], .length, UnitLength.yards)
         add(["mi", "mile", "miles", "milha", "milhas"], .length, UnitLength.miles)
         // Mass
@@ -154,10 +154,18 @@ enum CommandBarUnits {
                 tokens.append(raw)
                 continue
             }
-            let digits = raw.prefix { $0.isNumber || $0 == "." || $0 == "," || $0 == "-" }
-            let rest = raw.dropFirst(digits.count)
-            tokens.append(String(digits))
-            if !rest.isEmpty { tokens.append(String(rest)) }
+            // Numbers and unit words alternate: "5ft11in" and 5'11" read as
+            // a number, a unit, a number and a unit.
+            func isNumeric(_ character: Character) -> Bool {
+                character.isNumber || character == "." || character == "," || character == "-"
+            }
+            var rest = Substring(raw)
+            while let first = rest.first {
+                let numeric = isNumeric(first)
+                let run = rest.prefix { isNumeric($0) == numeric }
+                tokens.append(String(run))
+                rest = rest.dropFirst(run.count)
+            }
         }
         // The unit printed on a bottle is two words, "fl oz", and so is its
         // name; each reads as the single word the lexicon knows.

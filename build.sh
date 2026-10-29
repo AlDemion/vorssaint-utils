@@ -372,6 +372,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/Snippets/TextSnippetSupport.swift
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift
         Sources/Vorssaint/UI/Scratchpad/ScratchpadEditor.swift
+        Sources/Vorssaint/UI/Scratchpad/ScratchpadCalculationSyntax.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadMarkdown.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadDocument.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadSupport.swift

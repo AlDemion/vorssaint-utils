@@ -156,6 +156,7 @@ struct ScratchpadWorkspace: View {
                 }
                 Button { service.createPadInCollection() } label: { Image(systemName: "plus").frame(width: 24, height: 24).contentShape(Rectangle()) }
                     .help(text.newPad).accessibilityLabel(text.newPad).disabled(!service.canCreatePad)
+                if island { calculationButton }
                 actionsMenu
                 if !island {
                     Button(action: service.togglePin) {
@@ -432,6 +433,7 @@ struct ScratchpadWorkspace: View {
             Button { service.toggleSource() } label: { Image(systemName: service.isSourceMode ? "text.alignleft" : "chevron.left.forwardslash.chevron.right") }
                 .help(service.isSourceMode ? labels[.liveEditing] : labels[.source])
                 .accessibilityLabel(service.isSourceMode ? labels[.liveEditing] : labels[.source])
+            if !island { calculationButton }
             Button { service.copyAll(); copied = true } label: { Image(systemName: copied ? "checkmark" : "doc.on.doc") }
                 .help(copied ? text.copied : text.copyAll).accessibilityLabel(text.copyAll).disabled(service.text.isEmpty)
             Spacer()
@@ -443,6 +445,27 @@ struct ScratchpadWorkspace: View {
                 .help(text.clearAction).accessibilityLabel(text.clearAction).disabled(service.text.isEmpty)
         }
         .buttonStyle(.plain).font(.system(size: 12)).padding(.horizontal, 12).frame(height: 32)
+    }
+
+    /// The switch for calculation mode on the open note: in the island's top
+    /// row and the floating pad's footer, beside the other note buttons, and lit
+    /// while the mode is on. The note's actions menu carries the same switch.
+    private var calculationButton: some View {
+        let on = selectedPadUsesCalculation
+        let available = service.selectedPad.map { $0.deletedAt == nil } ?? false
+        return Button {
+            if let pad = service.selectedPad { service.toggleCalculationMode(pad.id) }
+        } label: {
+            Image(systemName: "function")
+                .foregroundStyle(on ? Color.green : (island ? Color.white : Color.primary))
+                .frame(width: 24, height: 24)
+                .background(on ? Color.green.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .disabled(!available)
+        .help(labels[.calculationMode])
+        .accessibilityLabel(labels[.calculationMode])
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var hostWindow: NSWindow? { editor.view?.window ?? (island ? NotchService.shared.presentationWindow : service.presentationWindow) }

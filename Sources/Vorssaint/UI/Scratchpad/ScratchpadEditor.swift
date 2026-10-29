@@ -348,6 +348,20 @@ struct ScratchpadEditor: NSViewRepresentable {
         fileprivate var buttons: [NSButton] = []
         private var renderedAppearance: String?
         private var publishedMarks: Set<ScratchpadMark>?
+        /// Which lines had an answer when the answers last arrived. Kept while a
+        /// new answer is on its way, so typing does not flash the colours off.
+        private var answeredLines: [Bool] = []
+
+        /// Names and labels, and the words that join a conversion, in colours
+        /// that stay readable on the paper and on the dark island surface.
+        private static let nameColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? .systemOrange : NSColor(calibratedRed: 0.72, green: 0.36, blue: 0.0, alpha: 1)
+        }
+        private static let keywordColor = NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                ? .systemCyan : NSColor(calibratedRed: 0.0, green: 0.42, blue: 0.60, alpha: 1)
+        }
 
         init(_ parent: ScratchpadEditor) { self.parent = parent }
 
@@ -377,7 +391,9 @@ struct ScratchpadEditor: NSViewRepresentable {
             let textChanged = analyzedText != view.string
             if textChanged { analysis = ScratchpadMarkdown(view.string); analyzedText = view.string }
             let ns = view.string as NSString
-            let appearance = "\(parent.sourceMode):\(parent.fontSize):\(parent.textColor.description):\(parent.calculationColumnWidth)"
+            let calculating = parent.calculationColumnWidth > 0
+            if !parent.calculationResults.isEmpty || !calculating { answeredLines = parent.calculationResults.map { $0 != nil } }
+            let appearance = "\(parent.sourceMode):\(parent.fontSize):\(parent.textColor.description):\(parent.calculationColumnWidth):\(answeredLines.hashValue)"
             if textChanged || renderedAppearance != appearance {
                 renderedAppearance = appearance
                 let undo = view.undoManager
@@ -385,7 +401,12 @@ struct ScratchpadEditor: NSViewRepresentable {
                 if undoEnabled { undo?.disableUndoRegistration() }
                 storage.beginEditing()
                 let full = NSRange(location: 0, length: ns.length)
-                let font = NSFont.systemFont(ofSize: parent.fontSize)
+                // A calculation note is set in a monospaced face so answers line up.
+                func face(_ size: CGFloat, _ weight: NSFont.Weight = .regular) -> NSFont {
+                    calculating ? .monospacedSystemFont(ofSize: size, weight: weight)
+                                : .systemFont(ofSize: size, weight: weight)
+                }
+                let font = face(parent.fontSize)
                 let paragraph = NSMutableParagraphStyle()
                 paragraph.paragraphSpacing = 7
                 // Reserve the answer margin on every line, so the note wraps
@@ -401,7 +422,7 @@ struct ScratchpadEditor: NSViewRepresentable {
                     for span in analysis.spans {
                         var styled = font
                         if let heading = span.heading {
-                            styled = .systemFont(ofSize: parent.fontSize + CGFloat(max(2, 12 - heading * 2)), weight: .semibold)
+                            styled = face(parent.fontSize + CGFloat(max(2, 12 - heading * 2)), .semibold)
                         }
                         if span.code || span.inline.contains(.code) {
                             styled = .monospacedSystemFont(ofSize: parent.fontSize, weight: .regular)
@@ -424,6 +445,14 @@ struct ScratchpadEditor: NSViewRepresentable {
                         if task.checked {
                             storage.addAttributes([.strikethroughStyle: 1, .foregroundColor: parent.textColor.withAlphaComponent(0.55)], range: task.content)
                         }
+                    }
+                }
+                if calculating {
+                    let answered = answeredLines
+                    for span in ScratchpadCalculationSyntax.spans(in: view.string, answered: { $0 < answered.count && answered[$0] }) {
+                        storage.addAttribute(.foregroundColor,
+                                             value: span.role == .keyword ? Self.keywordColor : Self.nameColor,
+                                             range: span.range)
                     }
                 }
                 storage.endEditing()
