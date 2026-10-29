@@ -11,6 +11,10 @@ import Foundation
 struct ScratchpadExchangeRateSnapshot: Codable, Equatable {
     let rates: ScratchpadCurrencyRates
     let fetchedAt: Date
+    /// The sources, in order, this table was downloaded from. A table made from
+    /// other sources than the ones chosen now is not current, even when it is
+    /// recent. Absent in tables saved before sources were chosen.
+    var sources: String? = nil
 
     static let maximumAge: TimeInterval = 24 * 60 * 60
 
@@ -174,7 +178,6 @@ final class ScratchpadExchangeRateService: ObservableObject {
     private let sources: () -> [ScratchpadRateProvider]
     private var snapshot: ScratchpadExchangeRateSnapshot
     private var lastAttempt: Date?
-    private var sourcesChanged = false
 
     /// A failed automatic attempt waits before trying again, so opening notes
     /// while offline does not become a stream of requests. The explicit
@@ -199,8 +202,14 @@ final class ScratchpadExchangeRateService: ObservableObject {
         rates = starting.rates
     }
 
+    private static func signature(_ providers: [ScratchpadRateProvider]) -> String {
+        providers.map(\.rawValue).joined(separator: ",")
+    }
+
+    /// Whether the table in use is a recent download made from the sources the
+    /// person has chosen now, in their order.
     var hasCurrentRates: Bool {
-        !sourcesChanged && snapshot.isFresh(now: now())
+        snapshot.sources == Self.signature(sources()) && snapshot.isFresh(now: now())
     }
 
     private var retryIsDue: Bool {
@@ -208,10 +217,10 @@ final class ScratchpadExchangeRateService: ObservableObject {
         return abs(now().timeIntervalSince(lastAttempt)) >= Self.automaticRetryInterval
     }
 
-    /// The person reordered or switched a source: the saved table no longer
-    /// reflects their choice, so the next automatic refresh asks again.
+    /// The person reordered or switched a source. The saved table remembers
+    /// which sources made it, so it is no longer current; this lets the next
+    /// automatic refresh run without waiting out an earlier failure.
     func sourcesDidChange() {
-        sourcesChanged = true
         lastAttempt = nil
     }
 
@@ -220,23 +229,27 @@ final class ScratchpadExchangeRateService: ObservableObject {
     /// is applied on the main thread before any view reads it.
     func refreshIfNeeded(force: Bool = false) {
         guard !isRefreshing else { return }
-        guard force || (retryIsDue && !hasCurrentRates) else { return }
         let providers = sources()
-        guard !providers.isEmpty else { return }
+        guard !providers.isEmpty, force || (retryIsDue && !hasCurrentRates) else { return }
+        let signature = Self.signature(providers)
         lastAttempt = now()
         isRefreshing = true
         failed = false
-        collect(providers[...], tables: []) { [weak self] tables in
+        collect(providers[...], tables: [], failures: 0) { [weak self] tables, failures in
             guard let self else { return }
             self.isRefreshing = false
-            guard let merged = ScratchpadRateMerge.merged(tables) else {
+            // A table that is short of currencies because a source failed would
+            // replace one that had them, so it is treated as a failed download.
+            // Short because the chosen sources simply do not publish those
+            // currencies is the person's choice and is kept.
+            let complete = ScratchpadRateMerge.missing(from: tables).isEmpty
+            guard let merged = ScratchpadRateMerge.merged(tables), complete || failures == 0 else {
                 self.failed = true
                 return
             }
-            let next = ScratchpadExchangeRateSnapshot(rates: merged, fetchedAt: self.now())
+            let next = ScratchpadExchangeRateSnapshot(rates: merged, fetchedAt: self.now(), sources: signature)
             self.snapshot = next
             self.rates = next.rates
-            self.sourcesChanged = false
             if let cacheURL = self.cacheURL {
                 _ = ScratchpadExchangeRateCache.save(next, to: cacheURL)
             }
@@ -244,15 +257,17 @@ final class ScratchpadExchangeRateService: ObservableObject {
     }
 
     /// Asks the sources in order until every supported currency has a rate or
-    /// none is left. A source that fails is skipped, not fatal.
-    private func collect(_ providers: ArraySlice<ScratchpadRateProvider>, tables: [ScratchpadRateTable],
-                         completion: @escaping ([ScratchpadRateTable]) -> Void) {
-        guard let provider = providers.first else { completion(tables); return }
+    /// none is left, and counts the sources that gave nothing. A source that
+    /// fails is skipped, not fatal.
+    private func collect(_ providers: ArraySlice<ScratchpadRateProvider>, tables: [ScratchpadRateTable], failures: Int,
+                         completion: @escaping ([ScratchpadRateTable], Int) -> Void) {
+        guard let provider = providers.first else { completion(tables, failures); return }
         fetch(provider, requests: provider.requests[...]) { [weak self] table in
             guard let self else { return }
             let next = table.map { tables + [$0] } ?? tables
-            if ScratchpadRateMerge.missing(from: next).isEmpty { completion(next); return }
-            self.collect(providers.dropFirst(), tables: next, completion: completion)
+            let failed = failures + (table == nil ? 1 : 0)
+            if ScratchpadRateMerge.missing(from: next).isEmpty { completion(next, failed); return }
+            self.collect(providers.dropFirst(), tables: next, failures: failed, completion: completion)
         }
     }
 

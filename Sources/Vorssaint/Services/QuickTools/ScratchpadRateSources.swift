@@ -32,7 +32,13 @@ struct ScratchpadRateTable: Equatable, Sendable {
         }
         guard let newest = kept.max(by: { $0.day < $1.day }) else { return nil }
         var rates: [String: Double] = [:]
-        for row in kept where newest.day - row.day <= maximumLagDays { rates[row.symbol] = row.rate }
+        var rateDays: [String: Int] = [:]
+        for row in kept where newest.day - row.day <= maximumLagDays {
+            // A currency listed twice keeps its newest rate, whatever the order.
+            if let existing = rateDays[row.symbol], existing >= row.day { continue }
+            rates[row.symbol] = row.rate
+            rateDays[row.symbol] = row.day
+        }
         return ScratchpadRateTable(date: newest.date, rates: rates)
     }
 

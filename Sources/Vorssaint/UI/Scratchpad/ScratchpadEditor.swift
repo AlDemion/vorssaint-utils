@@ -392,7 +392,11 @@ struct ScratchpadEditor: NSViewRepresentable {
             if textChanged { analysis = ScratchpadMarkdown(view.string); analyzedText = view.string }
             let ns = view.string as NSString
             let calculating = parent.calculationColumnWidth > 0
-            if !parent.calculationResults.isEmpty || !calculating { answeredLines = parent.calculationResults.map { $0 != nil } }
+            let currentFlags = parent.calculationResults.map { $0 != nil }
+            answeredLines = !calculating ? [] : !currentFlags.isEmpty ? currentFlags
+                : ScratchpadCalculationSyntax.flags(
+                    current: currentFlags, previous: answeredLines,
+                    lineCount: ScratchpadEditorLayout.lineStartLocations(in: view.string).count)
             let appearance = "\(parent.sourceMode):\(parent.fontSize):\(parent.textColor.description):\(parent.calculationColumnWidth):\(answeredLines.hashValue)"
             if textChanged || renderedAppearance != appearance {
                 renderedAppearance = appearance

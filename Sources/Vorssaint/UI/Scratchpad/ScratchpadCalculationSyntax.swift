@@ -32,9 +32,23 @@ enum ScratchpadCalculationSyntax {
             var lineStart = 0, lineEnd = 0, contentsEnd = 0
             ns.getLineStart(&lineStart, end: &lineEnd, contentsEnd: &contentsEnd,
                             for: NSRange(location: start, length: 0))
-            spans += lineSpans(in: ns, line: NSRange(location: lineStart, length: contentsEnd - lineStart))
+            guard contentsEnd > lineStart else { continue }
+            // Each line is matched on its own, so a long note costs one pass over
+            // its text rather than one per line.
+            spans += lineSpans(in: ns.substring(with: NSRange(location: lineStart, length: contentsEnd - lineStart)),
+                               offset: lineStart)
         }
         return spans
+    }
+
+    /// The answered-line flags to colour with. While a new answer is on its way
+    /// the results are empty; the flags from the last answer then stand in, so
+    /// typing does not flash the colours off, but only while the note still has
+    /// as many lines as they describe. After a line is added or removed they
+    /// would sit on the wrong lines, so none are used until the answer arrives.
+    static func flags(current: [Bool], previous: [Bool], lineCount: Int) -> [Bool] {
+        if !current.isEmpty { return current }
+        return previous.count == lineCount ? previous : []
     }
 
     private static let assignment = try! NSRegularExpression(pattern: #"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*="#)
@@ -43,26 +57,31 @@ enum ScratchpadCalculationSyntax {
                                                           options: .caseInsensitive)
     private static let nextWord = try! NSRegularExpression(pattern: #"^\s+([A-Za-z]+)"#)
 
-    private static func lineSpans(in ns: NSString, line: NSRange) -> [Span] {
-        guard line.length > 0 else { return [] }
+    private static func lineSpans(in line: String, offset: Int) -> [Span] {
+        let ns = line as NSString
         var spans: [Span] = []
-        var body = line
-        if let match = assignment.firstMatch(in: ns as String, range: line) {
-            spans.append(Span(range: match.range(at: 1), role: .variable))
-            body = NSRange(location: NSMaxRange(match.range), length: NSMaxRange(line) - NSMaxRange(match.range))
-        } else if let match = label.firstMatch(in: ns as String, range: line) {
-            spans.append(Span(range: match.range(at: 1), role: .label))
-            body = NSRange(location: NSMaxRange(match.range), length: NSMaxRange(line) - NSMaxRange(match.range))
+        func add(_ range: NSRange, _ role: Role) {
+            spans.append(Span(range: NSRange(location: range.location + offset, length: range.length), role: role))
         }
-        for match in keyword.matches(in: ns as String, range: body) {
-            let word = ns.substring(with: match.range).lowercased()
-            // "5 in to cm": the first "in" is inches and only the "to" connects.
-            if word == "in" {
-                let after = NSRange(location: NSMaxRange(match.range), length: NSMaxRange(body) - NSMaxRange(match.range))
-                if let next = nextWord.firstMatch(in: ns as String, range: after),
-                   ["to", "into", "as"].contains(ns.substring(with: next.range(at: 1)).lowercased()) { continue }
+        var body = NSRange(location: 0, length: ns.length)
+        if let match = assignment.firstMatch(in: line, range: body) {
+            add(match.range(at: 1), .variable)
+            body = NSRange(location: NSMaxRange(match.range), length: ns.length - NSMaxRange(match.range))
+        } else if let match = label.firstMatch(in: line, range: body) {
+            add(match.range(at: 1), .label)
+            body = NSRange(location: NSMaxRange(match.range), length: ns.length - NSMaxRange(match.range))
+        }
+        for match in keyword.matches(in: line, range: body) {
+            if ns.substring(with: match.range).lowercased() == "in" {
+                // "in" joins a conversion only when a unit or currency follows it:
+                // "total in usd". In "12 in", "5 in + 3 in" and "5 in to cm" it is
+                // the inches that the line is about, and only the "to" connects.
+                let after = NSRange(location: NSMaxRange(match.range), length: ns.length - NSMaxRange(match.range))
+                guard let next = nextWord.firstMatch(in: line, range: after),
+                      !["to", "into", "as"].contains(ns.substring(with: next.range(at: 1)).lowercased())
+                else { continue }
             }
-            spans.append(Span(range: match.range, role: .keyword))
+            add(match.range, .keyword)
         }
         return spans
     }

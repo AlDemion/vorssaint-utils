@@ -154,18 +154,10 @@ enum CommandBarUnits {
                 tokens.append(raw)
                 continue
             }
-            // Numbers and unit words alternate: "5ft11in" and 5'11" read as
-            // a number, a unit, a number and a unit.
-            func isNumeric(_ character: Character) -> Bool {
-                character.isNumber || character == "." || character == "," || character == "-"
-            }
-            var rest = Substring(raw)
-            while let first = rest.first {
-                let numeric = isNumeric(first)
-                let run = rest.prefix { isNumeric($0) == numeric }
-                tokens.append(String(run))
-                rest = rest.dropFirst(run.count)
-            }
+            let digits = raw.prefix { $0.isNumber || $0 == "." || $0 == "," || $0 == "-" }
+            let rest = raw.dropFirst(digits.count)
+            tokens.append(String(digits))
+            if !rest.isEmpty { tokens.append(contentsOf: unitChain(rest) ?? [String(rest)]) }
         }
         // The unit printed on a bottle is two words, "fl oz", and so is its
         // name; each reads as the single word the lexicon knows.
@@ -178,6 +170,28 @@ enum CommandBarUnits {
             }
         }
         return joined
+    }
+
+    /// What follows the first number when units and numbers alternate with no
+    /// space, as in 5'11" or 5ft11in: ["'", "11", "\""]. Only when every unit in
+    /// the chain is one the lexicon knows, so a word such as "m²" or "x4" is
+    /// never taken apart.
+    private static func unitChain(_ text: Substring) -> [String]? {
+        func isDigit(_ character: Character) -> Bool {
+            character.isASCII && (character.isNumber || character == "." || character == ",")
+        }
+        var runs: [String] = []
+        var rest = text
+        while let first = rest.first {
+            let digit = isDigit(first)
+            let run = rest.prefix { isDigit($0) == digit }
+            runs.append(String(run))
+            rest = rest.dropFirst(run.count)
+        }
+        guard runs.count > 1, runs.allSatisfy({ run in
+            run.first.map(isDigit) == true || lexicon[run] != nil
+        }) else { return nil }
+        return runs
     }
 
     private static let twoWordUnits = [

@@ -85,10 +85,11 @@ enum ScratchpadExchangeRateTests {
 
     private static func snapshot(date: String = "2026-10-25",
                                  fetchedAt: Date = now,
-                                 rates: [String: Double] = ["EUR": 0.9, "PLN": 4.0]) -> ScratchpadExchangeRateSnapshot {
+                                 rates: [String: Double] = ["EUR": 0.9, "PLN": 4.0],
+                                 sources: String? = "frankfurter") -> ScratchpadExchangeRateSnapshot {
         ScratchpadExchangeRateSnapshot(
             rates: ScratchpadCurrencyRates(date: date, base: "USD", rates: rates),
-            fetchedAt: fetchedAt)
+            fetchedAt: fetchedAt, sources: sources)
     }
 
     private static func parser(_ suite: TestSuite) {
@@ -108,6 +109,10 @@ enum ScratchpadExchangeRateTests {
                      "Frankfurter rows keep supported currencies against USD and drop crypto, unknown codes, other bases, null and zero rates")
         suite.expect(table?.date == "2026-10-25",
                      "a table is dated by its newest rate, and a rate more than a week older is left for another source")
+
+        let twice = #"[{"date":"2026-10-24","base":"USD","quote":"EUR","rate":0.8},{"date":"2026-10-25","base":"USD","quote":"EUR","rate":0.9},{"date":"2026-10-24","base":"USD","quote":"EUR","rate":0.7}]"#
+        suite.expect(ScratchpadRateProvider.frankfurter.table(from: Data(twice.utf8))?.rates["EUR"] == 0.9,
+                     "a currency listed twice keeps its newest rate whatever the order")
 
         let impossible = #"[{"date":"2026-02-30","base":"USD","quote":"EUR","rate":0.9},{"date":"yesterday","base":"USD","quote":"PLN","rate":4}]"#
         suite.expect(ScratchpadRateProvider.frankfurter.table(from: Data(impossible.utf8)) == nil,
@@ -200,6 +205,16 @@ enum ScratchpadExchangeRateTests {
                      "connecting words are picked out, and the inches in '5 ft 11 in to cm' are not mistaken for one")
         suite.expect(ScratchpadCalculationSyntax.spans(in: source) { _ in false }.isEmpty,
                      "lines without an answer, such as prose containing 'to' and 'in', are left alone")
+        let inches = "12 in\n5 in + 3 in\ntotal in usd\n5 in cm"
+        let inchSpans = ScratchpadCalculationSyntax.spans(in: inches) { _ in true }
+        suite.expect(inchSpans.map { (inches as NSString).substring(with: $0.range) } == ["in", "in"]
+                     && inchSpans.map { $0.range.location } == [inches.range(of: "total in")!.lowerBound.utf16Offset(in: inches) + 6,
+                                                                inches.range(of: "5 in cm")!.lowerBound.utf16Offset(in: inches) + 2],
+                     "'in' is a connecting word only before a unit or currency, not as the inches in '12 in' or '5 in + 3 in'")
+        suite.expect(ScratchpadCalculationSyntax.flags(current: [true], previous: [false, true], lineCount: 2) == [true]
+                     && ScratchpadCalculationSyntax.flags(current: [], previous: [false, true], lineCount: 2) == [false, true]
+                     && ScratchpadCalculationSyntax.flags(current: [], previous: [false, true], lineCount: 3).isEmpty,
+                     "earlier answers stand in while a new one is on its way, but not once the line count has changed")
         let windows = "a = 1\r\nb = 2"
         suite.expect(ScratchpadCalculationSyntax.spans(in: windows) { _ in true }.map(\.range)
                      == [NSRange(location: 0, length: 1), NSRange(location: 7, length: 1)],
@@ -219,6 +234,10 @@ enum ScratchpadExchangeRateTests {
         suite.expectClose(inches("5' in cm") ?? .nan, 152.4, "a bare foot mark means feet", tol: 0.001)
         suite.expectClose(inches("10\" in cm") ?? .nan, 25.4, "a bare inch mark means inches", tol: 0.001)
         suite.expect(inches("5\" 11' in cm") == nil, "inches before feet are not a height")
+        suite.expect(CommandBarUnits.tokenize("5m² in cm") == ["5", "m²", "in", "cm"]
+                     && CommandBarUnits.tokenize("3x4 in cm") == ["3", "x4", "in", "cm"]
+                     && CommandBarUnits.tokenize("100km to mi") == ["100", "km", "to", "mi"],
+                     "words that are not a chain of known units are not taken apart")
         let line = ScratchpadCalculationEvaluator.evaluate("5' 11\" in cm", decimalSeparator: ".", groupingSeparator: ",", locale: english)
         suite.expectClose(line.lines[0].value ?? .nan, 180.34, "a note line reads feet and inches written with marks", tol: 0.001)
     }
@@ -329,7 +348,8 @@ enum ScratchpadExchangeRateTests {
         let cachedService = ScratchpadExchangeRateService(
             cacheURL: url,
             loader: { _, _ in cachedLoads += 1 },
-            now: { now })
+            now: { now },
+            sources: { [.frankfurter] })
         suite.expect(cachedService.rates == cached.rates && cachedService.hasCurrentRates,
                      "the service starts from a current saved table")
         cachedService.refreshIfNeeded()
@@ -410,6 +430,8 @@ enum ScratchpadExchangeRateTests {
     /// Sources are asked in order, and a later one only when it is needed.
     private static func chain(_ suite: TestSuite) {
         let fawaz = #"{"date":"2026-10-25","usd":{"eur":0.91,"uah":45.6}}"#
+        let fullFawaz = "{\"date\":\"2026-10-25\",\"usd\":{"
+            + ScratchpadCurrency.supportedSymbols.subtracting(["usd"]).sorted().map { "\"\($0)\":2" }.joined(separator: ",") + "}}"
         func run(sources: [ScratchpadRateProvider], bodies: [String: (Int, String)]) -> (ScratchpadExchangeRateService, [String]) {
             var hosts: [String] = []
             let service = ScratchpadExchangeRateService(
@@ -452,9 +474,13 @@ enum ScratchpadExchangeRateTests {
                      "the ECB source asks Frankfurter's provider endpoint")
 
         let fallback = run(sources: [.frankfurter, .fawazahmed0],
-                           bodies: ["api.frankfurter.dev": (500, ""), "latest.currency-api.pages.dev": (200, fawaz)])
-        suite.expect(fallback.0.rates.rates["UAH"] == 45.6 && fallback.0.rates.date == "2026-10-25" && !fallback.0.failed,
-                     "a failing first source falls through to the next")
+                           bodies: ["api.frankfurter.dev": (500, ""), "latest.currency-api.pages.dev": (200, fullFawaz)])
+        suite.expect(fallback.0.rates.rates["UAH"] == 2 && fallback.0.rates.date == "2026-10-25" && !fallback.0.failed,
+                     "a failing first source falls through to a next one that has every currency")
+        let short = run(sources: [.ecb, .frankfurter],
+                        bodies: ["api.frankfurter.dev/v2/providers/ecb/rates": (200, payload)])
+        suite.expect(short.0.failed && short.0.rates.isBundled,
+                     "a table left short of currencies by a failed source is not taken for a download")
 
         let mirror = run(sources: [.fawazahmed0],
                          bodies: ["latest.currency-api.pages.dev": (503, ""), "cdn.jsdelivr.net": (200, fawaz)])
@@ -469,25 +495,71 @@ enum ScratchpadExchangeRateTests {
         suite.expect(dead.0.failed && dead.0.rates.isBundled,
                      "every source failing reports the failure and keeps the built-in table")
 
-        // Changing the sources makes the saved table stale.
+        // A table short of currencies because a source failed keeps the fuller saved one.
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("vorssaint-rates-chain-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("rates.json")
+        let saved = snapshot(fetchedAt: now.addingTimeInterval(-30 * 3600),
+                             rates: ["EUR": 0.9, "UAH": 45, "AED": 3.67], sources: "ecb,frankfurter")
+        _ = ScratchpadExchangeRateCache.save(saved, to: url)
+        var keptCalls = 0
+        let keeping = ScratchpadExchangeRateService(
+            cacheURL: url,
+            loader: { request, complete in
+                keptCalls += 1
+                let ok = request.url?.path.contains("/providers/ecb/") == true
+                complete(.success((Data((ok ? payload : "").utf8), Self.response(for: request, status: ok ? 200 : 500))))
+            },
+            now: { now },
+            sources: { [.ecb, .frankfurter] })
+        keeping.refreshIfNeeded()
+        _ = wait { keptCalls == 2 && !keeping.isRefreshing }
+        suite.expect(keeping.failed && keeping.rates == saved.rates
+                     && ScratchpadExchangeRateCache.load(from: url)?.rates == saved.rates,
+                     "one source failing never swaps a fuller saved table for a shorter one")
+        keeping.refreshIfNeeded()
+        suite.expect(keptCalls == 2, "the failed attempt waits before the next automatic one")
+
+        // The saved table remembers which sources made it, so a change is noticed
+        // mid-download and after a relaunch.
+        var active: [ScratchpadRateProvider] = [.frankfurter]
         var calls = 0
+        var held: ((Result<(Data, HTTPURLResponse), Error>) -> Void)?
+        var hold = false
+        let changeURL = directory.appendingPathComponent("changing.json")
         let changing = ScratchpadExchangeRateService(
-            cacheURL: nil,
+            cacheURL: changeURL,
             loader: { request, complete in
                 calls += 1
+                if hold { held = { complete($0) }; return }
                 complete(.success((Data(fullPayload().utf8), Self.response(for: request, status: 200))))
             },
             now: { now },
-            sources: { [.frankfurter] })
+            sources: { active })
         changing.refreshIfNeeded(force: true)
         _ = wait { calls == 1 && !changing.isRefreshing }
         suite.expect(changing.hasCurrentRates, "a downloaded table is current")
         changing.refreshIfNeeded()
         suite.expect(calls == 1, "a current table is not downloaded again")
+        active = [.ecb, .frankfurter]
         changing.sourcesDidChange()
         suite.expect(!changing.hasCurrentRates, "changing the sources makes the saved table stale")
+        hold = true
         changing.refreshIfNeeded()
-        suite.expect(wait { calls == 2 && !changing.isRefreshing }, "the next refresh after a change asks again")
+        suite.expect(wait { held != nil }, "the next refresh after a change asks again")
+        active = [.ecb, .frankfurter, .fawazahmed0]
+        changing.sourcesDidChange()
+        held?(.success((Data(fullPayload().utf8), Self.response(for: URLRequest(url: URL(string: "https://api.frankfurter.dev/v2/rates")!), status: 200))))
+        _ = wait { !changing.isRefreshing }
+        suite.expect(!changing.hasCurrentRates,
+                     "a change made while a download is under way is not forgotten when it finishes")
+        let relaunched = ScratchpadExchangeRateService(cacheURL: changeURL, loader: { _, _ in }, now: { now },
+                                                       sources: { [.ecb, .frankfurter] })
+        suite.expect(relaunched.hasCurrentRates, "after a relaunch the saved table is current for the sources that made it")
+        let other = ScratchpadExchangeRateService(cacheURL: changeURL, loader: { _, _ in }, now: { now },
+                                                  sources: { [.frankfurter, .ecb] })
+        suite.expect(!other.hasCurrentRates, "and not for the same sources in another order")
     }
 
     private static func currency(_ suite: TestSuite) {
